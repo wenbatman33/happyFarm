@@ -239,7 +239,9 @@ export class Hud {
     });
   }
 
-  setPet(bondLv: number, touchesLeft: number): void {
+  setPet(bondLv: number, touchesLeft: number, emoji = '🐶'): void {
+    const sp = $('.pet-btn span', this.root);
+    if (sp.textContent !== emoji) sp.textContent = emoji;
     $('.bond', this.root).textContent = `♥${bondLv}`;
     $('.pet-btn', this.root).classList.toggle('glow', touchesLeft > 0);
   }

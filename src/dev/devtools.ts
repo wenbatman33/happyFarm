@@ -187,6 +187,25 @@ export class DevTools {
     // ---- 寵物 ----
     const pf = gui.addFolder('🐶 寵物');
     pf.add(g.petTuning, 'followDist', 1.2, 6, 0.1).name('跟隨距離（公尺）').onChange(onCh);
+    pf.add({ s: g.pet.species }, 's', { 柯基: 'corgi', 橘貓: 'cat', 垂耳兔: 'bunny', 小鴨: 'duck' }).name('切換物種').onChange((sp: 'corgi' | 'cat' | 'bunny' | 'duck') => {
+      const d = g.state.data.pet;
+      d.species = sp;
+      g.pet.setSpecies(sp);
+      g.pet.setStage(d.stage, true);
+    });
+    for (const [label, st] of [['🍼 幼年', 0], ['🧒 少年', 1], ['🦮 成年', 2]] as const) {
+      pf.add({ f: () => { g.state.data.pet.stage = st; g.pet.setStage(st); } }, 'f').name(label);
+    }
+    pf.add({ f: () => { const d = g.state.data.pet; d.adoptedAt -= 15 * 86400000; d.bond = Math.max(d.bond, 400); } }, 'f').name('🌟 觸發長大（少年）');
+    pf.add({ f: () => { g.state.data.pet.tokens = 4; g.state.data.pet.napAt = 0; } }, 'f').name('⚡ 技能次數回滿');
+    pf.add({ f: () => { g.state.data.pet.giftDay = ''; } }, 'f').name('🎁 今天的禮物重置');
+    pf.add({ f: () => {
+      const now = g.state.now();
+      const i = [...Array(g.farm.count).keys()].find((j) => { const s = g.farm.status(j, now); return s === 'growing' || s === 'dry'; });
+      if (i === undefined) { g.hud.toast('先種一些作物'); return; }
+      const d = g.state.data;
+      d.mice.push({ id: `m${++d.miceSeq}`, plot: i, bornAt: now });
+    } }, 'f').name('🐭 放一隻田鼠');
     pf.add(this.view, 'bond', 0, BOND_THRESHOLDS[9], 10).name('親密度點數').onChange((v: number) => { g.state.data.pet.bond = v; });
     pf.add(this.view, 'petAnim', ['none', 'idle', 'walk', 'sit', 'happy', 'dig', 'sleep', 'petted']).name('強制動畫').onChange((a: string) => { g.pet.forcedAnim = a === 'none' ? null : (a as typeof g.pet.forcedAnim); });
     pf.close();

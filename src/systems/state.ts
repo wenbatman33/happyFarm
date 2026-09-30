@@ -3,13 +3,22 @@ import { NEWBIE_LEVEL, NEWBIE_XP_MULT, RESTED_CAP, RESTED_PER_HOUR, dailyXp, xpN
 import type { WeedKind } from '../world/weeds3d';
 import { FIELD_COLS, FIELD_COUNT, STARTER_PLOTS, UNLOCK_ORDER } from './farm';
 import { plotsForLevel } from '../data/economy';
+import { SPECIES, type Species } from '../actors/pet';
+import { DEFAULT_LOOK, type Look } from '../actors/player';
 
 export const SAVE_KEY = 'happyFarm.save';
 export const SCHEMA_VERSION = 1;
 
-export interface PlotSave { owned: boolean; tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number; fert: boolean }
+export interface PlotSave { owned: boolean; tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number; fert: boolean; boost?: boolean }
 export interface WeedSave { id: string; tx: number; tz: number; ox: number; oz: number; kind: WeedKind; bornAt: number; pulls: number; zone: string }
 export interface TreasureSpot { id: string; x: number; z: number }
+export interface PetSave {
+  name: string; bond: number; touchDay: string; touches: number;
+  species: Species; adoptedAt: number; stage: number;
+  tokens: number; tokenAt: number; // 兔子吃草、小鴨潑水的次數（隨時間回復）
+  giftDay: string; napAt: number;
+}
+export interface MouseSave { id: string; plot: number; bornAt: number }
 export interface OrderSave { id: string; items: { key: string; n: number }[]; coins: number; xp: number; done: boolean }
 export interface DebrisSave { id: string; x: number; z: number; kind: 'stone' | 'boulder' | 'stump' | 'log'; hits: number; rot: number }
 export interface CowSave { name: string; affection: number; fedAt: number; milkReadyAt: number | null; brushDay: string; brushes: number; milked: number }
@@ -28,7 +37,12 @@ export interface SaveData {
   weeds: WeedSave[];
   zones: Record<string, number>;
   weedSeq: number;
-  pet: { name: string; bond: number; touchDay: string; touches: number };
+  pet: PetSave;
+  look: Look | null; // null＝還沒捏人（新遊戲）
+  onboard: 'look' | 'pet' | 'done';
+  mice: MouseSave[];
+  miceSeq: number;
+  playerName: string;
   stats: { weedsPulled: number; harvests: number; bestCombo: number; ordersDone: number };
   selectedSeed: string;
   houseTier: number;
@@ -50,6 +64,9 @@ export function freshCow(): CowSave {
   return { name: '花花', affection: 0, fedAt: 0, milkReadyAt: 0, brushDay: '', brushes: 0, milked: 0 };
 }
 
+export const freshPet = (now: number, species: Species, name = SPECIES[species].name): PetSave =>
+  ({ name, bond: 0, touchDay: '', touches: 0, species, adoptedAt: now, stage: 0, tokens: 3, tokenAt: now, giftDay: '', napAt: 0 });
+
 const freshPlot = (now: number, owned: boolean): PlotSave => ({ owned, tilled: false, cropId: null, p0: 0, snapAt: now, wetUntil: 0, fert: false });
 
 export function freshSave(now: number): SaveData {
@@ -67,7 +84,12 @@ export function freshSave(now: number): SaveData {
     weeds: [],
     zones: {},
     weedSeq: 0,
-    pet: { name: '麻糬', bond: 0, touchDay: '', touches: 0 },
+    pet: freshPet(now, 'corgi'),
+    look: null,
+    onboard: 'look',
+    mice: [],
+    miceSeq: 0,
+    playerName: '',
     stats: { weedsPulled: 0, harvests: 0, bestCombo: 0, ordersDone: 0 },
     selectedSeed: 'radish',
     houseTier: 1,
@@ -111,6 +133,11 @@ function migrate(d: SaveData): SaveData {
   if (d.tutorial === undefined) d.tutorial = -1; // 舊玩家不再跑新手引導
   if (!d.orders) d.orders = { slot: '', list: [], skipAt: 0, seq: 0, seen: false };
   if (d.stats.ordersDone === undefined) d.stats.ordersDone = 0;
+  // M2（2026-09-30）：寵物物種與成長、主角外觀；舊玩家沿用柯基、預設外觀、略過開場
+  if (!d.pet.species) Object.assign(d.pet, { species: 'corgi', adoptedAt: d.createdAt, stage: 0, tokens: 3, tokenAt: d.maxSeen, giftDay: '', napAt: 0 });
+  if (d.look === undefined) { d.look = { ...DEFAULT_LOOK }; d.onboard = 'done'; }
+  if (!d.mice) { d.mice = []; d.miceSeq = 0; }
+  if (d.playerName === undefined) d.playerName = '';
   return d;
 }
 

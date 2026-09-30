@@ -64,9 +64,18 @@ export class Stage {
   yawGoal = 0;
   dist = 23;
   cam: CameraLayout;
+  // 特寫鏡頭：設定後鏡頭會平滑移到指定位置
+  override: { target: THREE.Vector3; dist: number; pitch: number; yaw: number } | null = null;
+
+  closeUp(target: THREE.Vector3 | null, dist = 6, pitch = 14, yaw = 0): void {
+    if (target) this.override = { target: target.clone(), dist, pitch, yaw };
+    else if (this.override) { this.override = null; this.restoring = true; }
+  }
 
   private sky: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   private fog = new THREE.Fog('#d5ebff', 50, 120);
+  private ovPitch = 50;
+  restoring = false;
 
   constructor(container: HTMLElement, cam: CameraLayout) {
     this.cam = cam;
@@ -224,7 +233,30 @@ export class Stage {
   }
 
   updateCamera(focus: THREE.Vector3, dt: number): void {
+    const ov = this.override;
+    if (ov) {
+      const k2 = 1 - Math.exp(-3 * dt);
+      this.target.lerp(ov.target, k2);
+      this.dist += (ov.dist - this.dist) * k2;
+      let dy = ov.yaw - this.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      this.yaw += dy * k2;
+      this.yawGoal = this.yaw;
+      this.ovPitch += (ov.pitch - this.ovPitch) * k2;
+      const pitch = THREE.MathUtils.degToRad(this.ovPitch);
+      const horiz = Math.cos(pitch) * this.dist;
+      this.camera.position.set(this.target.x + Math.sin(this.yaw) * horiz, this.target.y + Math.sin(pitch) * this.dist, this.target.z + Math.cos(this.yaw) * horiz);
+      this.camera.lookAt(this.target);
+      this.sky.position.copy(this.camera.position);
+      return;
+    }
+    this.ovPitch = this.cam.pitch;
     const k = 1 - Math.exp(-this.cam.followDamp * dt);
+    // 特寫結束後，鏡頭距離慢慢回到預設
+    if (this.restoring) {
+      this.dist += (this.cam.dist - this.dist) * (1 - Math.exp(-2.5 * dt));
+      if (Math.abs(this.dist - this.cam.dist) < 0.2) this.restoring = false;
+    }
     this.target.lerp(focus, k);
     // 鏡頭旋轉：取最短路徑轉到目標角度
     let d = this.yawGoal - this.yaw;

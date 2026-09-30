@@ -241,7 +241,10 @@ export class Farm {
     const d = this.def(i);
     if (!d || this.progress(i, now) < 1) return null;
     const p = this.plot(i);
-    const quality = rollQuality(Math.random(), true, p.fert);
+    // 貓咪午睡加持：品質機率往上移 10%
+    const r = Math.random();
+    const quality = rollQuality(p.boost ? Math.max(0, r - 0.1) : r, true, p.fert);
+    p.boost = false;
     p.cropId = null;
     p.p0 = 0;
     p.snapAt = now;

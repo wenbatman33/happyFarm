@@ -11,8 +11,11 @@ import { World } from './world/environment';
 import { Particles } from './world/particles';
 import { GEO, mat, mesh, windUniforms } from './world/materials';
 import { Player } from './actors/player';
-import { Pet } from './actors/pet';
-import { GameState, type WeedSave } from './systems/state';
+import { Pet, SPECIES, GROWTH, type Species } from './actors/pet';
+import { DEFAULT_LOOK } from './actors/player';
+import { PetSkills } from './systems/petSkills';
+import { openCreator, openPetPicker } from './ui/creator';
+import { GameState, freshPet, type WeedSave } from './systems/state';
 import { Farm } from './systems/farm';
 import { Weeds } from './systems/weeds';
 import { WEATHER_ICON, WEATHER_OVERCAST, WeatherFx, weatherAt, type Weather } from './systems/weather';
@@ -37,7 +40,9 @@ export type Target =
   | { kind: 'orders' }
   | { kind: 'buy'; i: number }
   | { kind: 'debris'; id: string }
-  | { kind: 'compost'; act: 'add' | 'collect' };
+  | { kind: 'compost'; act: 'add' | 'collect' }
+  | { kind: 'treasure'; id: string }
+  | { kind: 'mouse'; id: string };
 
 const keyOf = (t: Target): string => {
   switch (t.kind) {
@@ -47,6 +52,8 @@ const keyOf = (t: Target): string => {
     case 'cow': return `cow${t.act}`;
     case 'debris': return `d${t.id}`;
     case 'compost': return `compost${t.act}`;
+    case 'treasure': return `t${t.id}`;
+    case 'mouse': return `m${t.id}`;
     default: return t.kind;
   }
 };
@@ -81,6 +88,8 @@ export class Game {
   debris: Debris;
   orders: Orders;
   tutorial: Tutorial;
+  petSkills: PetSkills;
+  onboarding = false;
   particles: Particles;
   weatherFx: WeatherFx;
   fx: ScreenFx;
@@ -127,12 +136,15 @@ export class Game {
     this.weatherFx = new WeatherFx(this.stage.scene);
     this.fx = new ScreenFx(this.stage.camera);
     this.player = new Player(this.grid);
-    this.pet = new Pet(this.grid);
+    this.pet = new Pet(this.grid, d.pet.species, d.pet.name);
+    this.pet.setStage(d.pet.stage, true);
+    this.player.setLook(d.look ?? DEFAULT_LOOK);
     this.stage.scene.add(this.player.root, this.pet.root);
     this.mower = new Mower(this);
     this.ranch = new Ranch(this);
     this.orders = new Orders(this);
     this.tutorial = new Tutorial(this);
+    this.petSkills = new PetSkills(this);
     const L = this.sceneLayout;
     const bubbleAt = (x: number, z: number, y: number) => { const g = new THREE.Group(); g.position.set(x, 0, z); this.world.root.add(g); return new Bubble(g, y); };
     this.bubbles = { mail: bubbleAt(L.mailbox.x, L.mailbox.z, 1.85), compost: bubbleAt(L.compost.x, L.compost.z, 1.45), house: bubbleAt(L.house.x, L.house.z + 1, 5.6) };
@@ -163,7 +175,8 @@ export class Game {
     this.hud.applyLayout(this.layout);
     this.refreshHud();
     this.stage.renderer.setAnimationLoop(() => this.tick());
-    if (d.tutorial === 0) window.setTimeout(() => void this.tutorial.start(), 700);
+    if (d.onboard !== 'done') window.setTimeout(() => void this.runOnboarding(), 500);
+    else if (d.tutorial === 0) window.setTimeout(() => void this.tutorial.start(), 700);
   }
 
   // ---------- 版面 ----------
@@ -181,7 +194,6 @@ export class Game {
 
   // ---------- 事件綁定 ----------
   private wire() {
-    const d = this.state.data;
     this.state.onLevelUp = (lv) => this.onLevelUp(lv);
     this.hud.onTool = (id) => this.selectTool(id);
     this.hud.onBag = () => this.openBag();
@@ -199,11 +211,7 @@ export class Game {
         if (w) this.particles.burst('dirt', this.weeds.worldPos(w, 0.05), 1, { speed: 1, up: 1.5, size: 0.06 });
       }
     };
-    this.pet.name = d.pet.name;
-    this.pet.onBark = () => sfx.woof();
-    this.pet.onDigTick = (at) => this.particles.burst('dirt', at, 2, { speed: 1.4, up: 2.5, size: 0.08 });
-    this.pet.onDug = (id, at) => this.collectTreasure(id, at);
-    this.pet.onZzz = (at) => this.particles.burst('zzz', at, 1, { speed: 0.15, up: 0.5, gravity: -0.2, size: 0.28, life: 2.2 });
+    this.wirePet();
 
     const cv = this.stage.renderer.domElement;
     cv.addEventListener('pointerdown', (e) => this.onDown(e));
@@ -221,8 +229,153 @@ export class Game {
     window.addEventListener('pagehide', () => this.state.save());
   }
 
+  private wirePet() {
+    this.pet.onBark = () => this.petVoice();
+    this.pet.onDigTick = (at) => this.particles.burst('dirt', at, 2, { speed: 1.4, up: 2.5, size: 0.08 });
+    this.pet.onDug = (id, at) => this.collectTreasure(id, at, true);
+    this.pet.onZzz = (at) => this.particles.burst('zzz', at, 1, { speed: 0.15, up: 0.5, gravity: -0.2, size: 0.28, life: 2.2 });
+  }
+
+  // 不同物種的叫聲
+  private petVoice(species: Species = this.pet.species) {
+    if (species === 'corgi') sfx.woof();
+    else if (species === 'cat') sfx.meow();
+    else if (species === 'duck') sfx.quack();
+    else sfx.squeak();
+  }
+
+  // ---------- 開場：捏人 → 選寵物 → 奶奶的信 ----------
+  private async runOnboarding() {
+    const d = this.state.data;
+    this.onboarding = true;
+    document.body.classList.add('onboarding');
+    this.clearQueue();
+    const h = this.sceneLayout.house;
+    const pl = this.player.root;
+    if (d.onboard === 'look') {
+      pl.position.set(h.x, 0, h.z + 4.2);
+      pl.rotation.y = 0;
+      this.player.mover.yawGoal = 0;
+      this.pet.root.visible = false;
+      const wide = window.innerWidth > 640;
+      // 鏡頭拉近主角；PC 版讓主角偏左（右邊是設定卡）
+      this.stage.closeUp(new THREE.Vector3(pl.position.x + (wide ? 0.9 : 0), wide ? 0.95 : 0.4, pl.position.z), wide ? 5.6 : 6.4, 8, 0);
+      const r = await openCreator(d.look, d.playerName, (l) => this.player.setLook(l), { title: '✨ 捏一個你', ok: '下一步', showName: true });
+      d.look = r.look;
+      d.playerName = r.name;
+      this.player.setLook(r.look);
+      d.onboard = 'pet';
+      sfx.levelUp();
+      this.state.save();
+    }
+    if (d.onboard === 'pet') {
+      this.pet.root.visible = false;
+      const order: Species[] = ['corgi', 'cat', 'bunny', 'duck'];
+      const narrow = window.innerWidth <= 640;
+      const center = new THREE.Vector3(h.x, 0, h.z + 6);
+      pl.position.set(h.x, 0, h.z + 4.2);
+      const shows = order.map((sp, i) => {
+        const pt = new Pet(this.grid, sp);
+        pt.setStage(0, true);
+        // 手機直式畫面窄：排成 2×2
+        if (narrow) pt.root.position.set(center.x + (i % 2 ? 0.8 : -0.8), 0, center.z + (i < 2 ? -0.6 : 0.8));
+        else pt.root.position.set(center.x - 2.4 + i * 1.6, 0, center.z);
+        this.stage.scene.add(pt.root);
+        return pt;
+      });
+      let focus: Species = 'corgi';
+      const anim = new Map<Species, 'idle' | 'happy' | 'sit'>(order.map((sp) => [sp, 'sit']));
+      const tick = (dt: number) => shows.forEach((pt) => pt.showcase(dt, anim.get(pt.species)!));
+      this.showcaseTick = tick;
+      // 鏡頭注視點放在寵物前方，讓牠們出現在選單上面
+      if (narrow) this.stage.closeUp(new THREE.Vector3(center.x, 0, center.z + 2.4), 8.5, 30, 0);
+      else this.stage.closeUp(new THREE.Vector3(center.x, 0.1, center.z - 0.2), 7.5, 18, 0);
+      const r = await openPetPicker((sp) => {
+        focus = sp;
+        order.forEach((o) => anim.set(o, o === sp ? 'happy' : 'sit'));
+        shows.find((pt) => pt.species === sp)!.resetTimer();
+        this.petVoice(sp);
+      });
+      // 其他寵物揮手道別
+      const chosen = shows.find((pt) => pt.species === r.species)!;
+      for (const pt of shows) {
+        if (pt === chosen) continue;
+        this.particles.burst('fluff', pt.root.position.clone().setY(0.4), 12, { speed: 1.5, up: 1.5, gravity: -0.3, size: 0.12, life: 0.7 });
+        this.stage.scene.remove(pt.root);
+      }
+      this.stage.scene.remove(chosen.root);
+      this.showcaseTick = null;
+      d.pet = freshPet(this.state.now(), r.species, r.name);
+      this.pet.setSpecies(r.species);
+      this.pet.name = r.name;
+      this.pet.setStage(0, true);
+      this.pet.root.position.copy(chosen.root.position);
+      this.pet.root.visible = true;
+      this.pet.react();
+      this.petVoice(r.species);
+      void focus;
+      d.onboard = 'done';
+      this.state.save();
+    }
+    this.stage.closeUp(null);
+    document.body.classList.remove('onboarding');
+    this.onboarding = false;
+    if (d.tutorial === 0) window.setTimeout(() => void this.tutorial.start(), 900);
+  }
+  private showcaseTick: ((dt: number) => void) | null = null;
+
+  // ---------- 寵物：技能、禮物、成長 ----------
+  petEatWeed(w: WeedSave): void {
+    if (!this.weeds.get(w.id)) return;
+    const pos = this.weeds.worldPos(w, 0.25);
+    this.weeds.remove(w.id);
+    const [item, n] = WEED_ITEM[w.kind];
+    this.state.addItem(item, n);
+    this.state.data.stats.weedsPulled++;
+    sfx.pop(0);
+    this.particles.burst(w.kind === 'leaves' ? 'leaf' : w.kind === 'snow' ? 'snow' : 'grass', pos, 8, { speed: 1.5, up: 2.5, size: 0.8 });
+    this.fx.float(pos.clone().setY(1), `${this.pet.name}吃掉了 ${ITEM_INFO[item].emoji}`, 'love');
+    this.fx.fly(pos, ITEM_INFO[item].emoji, this.hud.el('bag'));
+  }
+
+  petGift(): void {
+    const at = this.pet.root.position.clone().setY(0.9);
+    this.pet.react();
+    this.petVoice();
+    const r = Math.random();
+    const gift: [string, number] = r < 0.05 ? ['clover', 1] : r < 0.3 ? ['fert', 1] : r < 0.55 ? ['hay', 3] : r < 0.8 ? ['wood', 4] : ['stone', 4];
+    this.state.addItem(gift[0], gift[1]);
+    const info = ITEM_INFO[gift[0]];
+    this.particles.burst('heart', at, 5, { speed: 1, up: 1.4, size: 0.3, life: 1.1 });
+    this.fx.fly(at, info.emoji, this.hud.el('bag'));
+    this.hud.toast(`🎁 ${this.pet.name}叼來一份禮物：${info.emoji} ${info.name} ×${gift[1]}`, 3200);
+  }
+
+  private growthStage(now: number): number {
+    const d = this.state.data.pet;
+    const days = (now - d.adoptedAt) / 86400000;
+    const b = bondLevel(d.bond);
+    return days >= 60 && b >= 6 ? 2 : days >= 14 && b >= 3 ? 1 : 0;
+  }
+
+  private growT = 0;
+  private checkGrowth(now: number) {
+    const d = this.state.data.pet;
+    const want = this.growthStage(now);
+    if (want <= d.stage || this.onboarding || this.pet.state === 'sleep' || this.player.busy) return;
+    d.stage = want;
+    this.pet.mover.stop();
+    this.pet.setStage(want);
+    this.stage.closeUp(this.pet.root.position.clone().setY(0.6), 4.5, 16, this.stage.yaw);
+    this.growT = 3.2;
+    sfx.fanfare();
+    this.particles.burst('sparkle', this.pet.root.position.clone().setY(0.8), 26, { speed: 2.5, up: 3, size: 0.45, life: 1.3 });
+    this.hud.toast(`🌟 ${this.pet.name}長大了！現在是${GROWTH[want].label}${SPECIES[d.species].label}`, 4000);
+    this.state.save();
+  }
+
   private onKey(e: KeyboardEvent, down: boolean) {
-    if ((e.target as HTMLElement)?.closest?.('.lil-gui')) return;
+    if ((e.target as HTMLElement)?.closest?.('.lil-gui, .creator, .petpick')) return;
     const k = e.key.toLowerCase();
     if (!down) { this.keys.delete(k); return; }
     sfx.unlock();
@@ -241,7 +394,7 @@ export class Game {
 
   private onDown(e: PointerEvent) {
     sfx.unlock();
-    if (this.inputBlocked) return;
+    if (this.inputBlocked || this.onboarding) return;
     if (this.hud.menuOpen) this.hud.hideMenu();
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -352,6 +505,9 @@ export class Game {
         if (k) return { kind: 'prop', key: k };
       }
     }
+    // 田鼠、挖寶點
+    for (const m of this.state.data.mice) { const mp = this.petSkills.mousePos(m); if (Math.hypot(mp.x - hit.x, mp.z - hit.z) < 0.5) return { kind: 'mouse', id: m.id }; }
+    if (!dragging) for (const t of this.state.data.treasure.spots) if (Math.hypot(t.x - hit.x, t.z - hit.z) < 0.55) return { kind: 'treasure', id: t.id };
     // 荒地障礙物
     for (const db of this.debris.list) if (Math.hypot(db.x - hit.x, db.z - hit.z) < 0.62) return { kind: 'debris', id: db.id };
     // 雜草：容許一點偏移，找最近的
@@ -430,6 +586,7 @@ export class Game {
     if (t.kind === 'plot') on ? this.farm.queued.add(t.i) : this.farm.queued.delete(t.i);
     if (t.kind === 'weed') on ? this.weeds.queued.add(t.id) : this.weeds.queued.delete(t.id);
     if (t.kind === 'debris') on ? this.debris.queued.add(t.id) : this.debris.queued.delete(t.id);
+    if (t.kind === 'mouse') on ? this.petSkills.queued.add(t.id) : this.petSkills.queued.delete(t.id);
   }
 
   private finish() {
@@ -447,6 +604,8 @@ export class Game {
       case 'menu': case 'orders': case 'buy': return null;
       case 'debris': { const db = this.debris.get(t.id); return db ? { x: db.x, z: db.z } : null; }
       case 'compost': return { x: this.sceneLayout.compost.x, z: this.sceneLayout.compost.z };
+      case 'treasure': { const tr = this.state.data.treasure.spots.find((x) => x.id === t.id); return tr ? { x: tr.x, z: tr.z } : null; }
+      case 'mouse': { const m = this.state.data.mice.find((x) => x.id === t.id); return m ? this.petSkills.mousePos(m) : null; }
       case 'prop': {
         const L = this.sceneLayout;
         const p = t.key === 'house' ? { x: L.house.x, z: L.house.z + 3.6 } : t.key === 'doghouse' ? L.doghouse : t.key === 'mailbox' ? L.mailbox : L.compost;
@@ -462,7 +621,7 @@ export class Game {
     const pos = this.targetPos(t);
     if (!pos) { this.finish(); return; }
     const p = this.player.root.position;
-    const reach = t.kind === 'plot' ? 0.9 : t.kind === 'weed' ? 0.7 : t.kind === 'pet' ? 0.95 : t.kind === 'debris' ? 0.95 : t.kind === 'compost' ? 1.05 : 0;
+    const reach = t.kind === 'plot' ? 0.9 : t.kind === 'weed' ? 0.7 : t.kind === 'pet' ? 0.95 : t.kind === 'debris' ? 0.95 : t.kind === 'compost' ? 1.05 : t.kind === 'treasure' ? 0.75 : t.kind === 'mouse' ? 0.8 : 0;
     if (t.kind === 'pet') this.pet.startPetted(p.x, p.z);
     if (t.kind === 'cow') {
       this.ranch.prepare(t.act);
@@ -486,6 +645,17 @@ export class Game {
       case 'cow': return this.ranch.whenReady(() => this.actCow(t.act));
       case 'debris': return this.actDebris(t.id);
       case 'compost': return this.actCompost(t.act);
+      case 'treasure': {
+        // 主角自己挖（柯基以外的寵物不會挖寶）
+        const tr = this.state.data.treasure.spots.find((x) => x.id === t.id);
+        if (!tr) return this.finish();
+        const at = new THREE.Vector3(tr.x, 0.3, tr.z);
+        this.player.play('hoe', () => { sfx.dig(); this.particles.burst('dirt', at, 10, { speed: 1.8, up: 3, size: 0.1 }); this.collectTreasure(t.id, at, false); }, () => this.finish());
+        return;
+      }
+      case 'mouse':
+        this.player.play('harvest', () => this.petSkills.shoo(t.id), () => this.finish());
+        return;
       default: return this.finish();
     }
   }
@@ -521,6 +691,7 @@ export class Game {
     if (key === 'cow') this.enqueue({ kind: 'cow', act: act as CowAct });
     else if (key === 'compost') this.enqueue({ kind: 'compost', act: act as 'add' | 'collect' });
     else if (key === 'house' && act === 'repair') void this.startRepair();
+    else if (key === 'house' && act === 'wardrobe') void this.openWardrobe();
   }
 
   // ---------- 堆肥桶 ----------
@@ -588,8 +759,30 @@ export class Game {
       }
       items.push({ act: 'repair', emoji: '🔨', label: '修繕房屋', enabled: !lack.length, note: lack.length ? lack.join(' ') : `🪙${HOUSE_T2.coins} 🪵${HOUSE_T2.wood}` });
     }
+    items.push({ act: 'wardrobe', emoji: '👕', label: '換裝', enabled: true, note: '換髮型、衣服顏色' });
     items.push({ act: 'enter', emoji: '🚪', label: '進屋看看', enabled: false, note: '室內在 M3 開放' });
     return { title: h.tier === 1 ? '🏠 奶奶的小木屋' : '🏠 修繕好的小木屋', sub, items };
+  }
+
+  private async openWardrobe() {
+    const d = this.state.data;
+    this.onboarding = true;
+    document.body.classList.add('onboarding');
+    this.clearQueue();
+    this.player.mover.stop();
+    const pl = this.player.root;
+    pl.rotation.y = this.stage.yaw;
+    this.player.mover.yawGoal = this.stage.yaw;
+    const wide = window.innerWidth > 640;
+    this.stage.closeUp(new THREE.Vector3(pl.position.x + (wide ? Math.cos(this.stage.yaw) * 0.9 : 0), wide ? 0.95 : 0.4, pl.position.z - (wide ? Math.sin(this.stage.yaw) * 0.9 : 0)), wide ? 5.6 : 6.4, 8, this.stage.yaw);
+    const r = await openCreator(d.look, d.playerName, (l) => this.player.setLook(l), { title: '👕 換裝', ok: '完成', showName: false });
+    d.look = r.look;
+    this.player.setLook(r.look);
+    this.stage.closeUp(null);
+    document.body.classList.remove('onboarding');
+    this.onboarding = false;
+    sfx.sparkle();
+    this.state.save();
   }
 
   private async startRepair() {
@@ -810,6 +1003,10 @@ export class Game {
     this.fx.fly(pos, def.emoji, this.hud.el('bag'));
     this.gainXp(def.xp, pos, true);
     if (quality !== 'normal') this.fx.float(pos.clone().setY(1), `${QUALITY_LABEL[quality]}！`, 'coin', 0.25);
+    if (this.pet.species === 'bunny' && def.shape.kind === 'root' && Math.random() < 0.1) {
+      this.state.addItem(key);
+      this.fx.float(pos.clone().setY(1.3), `🐰 多收 1 個！`, 'love', 0.35);
+    }
     if (quality === 'gold' || Math.random() < 0.2) this.pet.react();
   }
 
@@ -942,13 +1139,17 @@ export class Game {
       const left = this.state.petTouchesLeft(this.state.now());
       if (left > 0) {
         const before = bondLevel(d.pet.bond);
+        const pts = PET_TOUCH_POINTS * (d.pet.species === 'duck' && this.weather === 'rain' ? 2 : 1);
         d.pet.touches++;
-        d.pet.bond += PET_TOUCH_POINTS;
+        d.pet.bond += pts;
         sfx.woof();
         this.particles.burst('heart', at, 6, { speed: 1, up: 1.5, size: 0.35, life: 1.2 });
-        this.fx.float(at, `+${PET_TOUCH_POINTS} ♥`, 'love');
+        this.fx.float(at, `+${pts} ♥`, 'love');
         const after = bondLevel(d.pet.bond);
-        if (after > before) this.hud.toast(`💕 和${this.pet.name}的親密度升到 ${after} 級！`, 3000);
+        if (after > before) {
+          const unlock: Record<number, string> = { 2: '學會翻肚打滾', 3: '戴上小草帽', 4: '技能升到 Lv2', 5: '每天會送你禮物', 6: '繫上紅領巾', 7: '技能升到 Lv3' };
+          this.hud.toast(`💕 和${this.pet.name}的親密度升到 ${after} 級！${unlock[after] ? `（${unlock[after]}）` : ''}`, 3400);
+        }
       } else {
         this.particles.burst('heart', at, 2, { speed: 0.6, up: 1, size: 0.3, life: 1 });
         this.hud.toast(`${this.pet.name}今天已經被摸夠囉（每天 3 次）`);
@@ -960,7 +1161,7 @@ export class Game {
   private actProp(key: string) {
     const d = this.state.data;
     const msg: Record<string, string> = {
-      doghouse: `🐶 ${this.pet.name}的家（親密度 ${bondLevel(d.pet.bond)}）`,
+      doghouse: `${SPECIES[this.pet.species].emoji} ${this.pet.name}的小屋（親密度 ${bondLevel(d.pet.bond)}，${GROWTH[d.pet.stage].label}）`,
     };
     this.hud.toast(msg[key] ?? key, 2800);
     this.finish();
@@ -1009,7 +1210,7 @@ export class Game {
     }
   }
 
-  private collectTreasure(id: string, at: THREE.Vector3) {
+  private collectTreasure(id: string, at: THREE.Vector3, byPet = false) {
     const tr = this.state.data.treasure;
     if (!tr.spots.find((s) => s.id === id)) return;
     tr.spots = tr.spots.filter((s) => s.id !== id);
@@ -1019,16 +1220,16 @@ export class Game {
     const r = Math.random();
     if (r < 0.1) {
       this.state.addItem('coin_old');
-      this.hud.toast(`🐶 ${this.pet.name}挖到了古錢幣！`);
+      this.hud.toast(byPet ? `🐶 ${this.pet.name}挖到了古錢幣！` : '⛏️ 挖到了古錢幣！');
     } else if (r < 0.3) {
       this.gainXp(40, at, false);
-      this.hud.toast(`🐶 ${this.pet.name}挖到了一包經驗種子！`);
+      this.hud.toast(byPet ? `🐶 ${this.pet.name}挖到了一包經驗種子！` : '⛏️ 挖到了一包經驗種子！');
     } else {
-      const c = 30 + Math.floor(Math.random() * 50);
+      const c = Math.round((30 + Math.floor(Math.random() * 50)) * (byPet && this.pet.species === 'corgi' ? 1.2 : 1));
       this.state.data.coins += c;
       sfx.coin();
       this.fx.float(at, `+${c} 🪙`, 'coin');
-      this.hud.toast(`🐶 ${this.pet.name}挖到了 ${c} 金幣！`);
+      this.hud.toast(byPet ? `🐶 ${this.pet.name}挖到了 ${c} 金幣！` : `⛏️ 挖到了 ${c} 金幣！`);
     }
   }
 
@@ -1098,7 +1299,7 @@ export class Game {
     this.hud.setWallet(d.coins, this.season, clock.now(), WEATHER_ICON[this.weather]);
     this.toolSlots = this.buildToolSlots();
     this.hud.setTools(this.toolSlots);
-    this.hud.setPet(bondLevel(d.pet.bond), this.state.petTouchesLeft(now));
+    this.hud.setPet(bondLevel(d.pet.bond), this.state.petTouchesLeft(now), SPECIES[this.pet.species].emoji);
     this.hud.setBagCount(Object.entries(d.inventory).reduce((s, [, v]) => s + v, 0));
     const icons: string[] = [];
     for (const t of [this.current, ...this.queue]) {
@@ -1113,6 +1314,8 @@ export class Game {
       else if (t.kind === 'cow') icons.push({ feed: '🌾', brush: '🪮', milk: '🥛' }[t.act]);
       else if (t.kind === 'debris') { const db = this.debris.get(t.id); icons.push(db && DEBRIS[db.kind].item === 'wood' ? '🪓' : '⛏️'); }
       else if (t.kind === 'compost') icons.push('🪣');
+      else if (t.kind === 'treasure') icons.push('💎');
+      else if (t.kind === 'mouse') icons.push('🐭');
     }
     this.hud.setQueue(icons);
     // 提示：新手引導中顯示引導文字；之後只在有田可買時提醒
@@ -1164,6 +1367,7 @@ export class Game {
       const sel = CROP_BY_ID[this.state.data.selectedSeed];
       if (sel && sel.season !== 'all' && sel.season !== this.season) this.state.data.selectedSeed = 'radish';
       this.weather = this.weatherOverride ?? weatherAt(now, this.season);
+      this.checkGrowth(now);
     }
 
     // 鍵盤移動（相對鏡頭方向）；推除草機時交給 Mower
@@ -1194,7 +1398,7 @@ export class Game {
     this.tutorialHint = this.tutorial.update(dt);
     {
       const d = this.state.data;
-      this.bubbles.mail.set(!this.orders.d.seen || this.orders.deliverable ? (this.orders.deliverable ? '✅' : '❗') : null);
+      this.bubbles.mail.set(this.onboarding ? null : !this.orders.d.seen || this.orders.deliverable ? (this.orders.deliverable ? '✅' : '❗') : null);
       this.bubbles.compost.set(d.compost.some((t) => t <= now) ? '🧪' : null);
       this.bubbles.house.set(d.house.buildUntil ? '🔨' : null);
       for (const b of Object.values(this.bubbles)) b.update(this.elapsed);
@@ -1205,8 +1409,13 @@ export class Game {
     this.placeMenu();
     this.player.update(dt);
     const dh = this.sceneLayout.doghouse;
-    this.pet.update(dt, { player: this.player, night, doghouse: { x: dh.x, z: dh.z, rotY: dh.rotY }, treasures: this.state.data.treasure.spots, followDist: this.petTuning.followDist });
-    if (!this.mower.active) this.runQueue();
+    if (!this.onboarding || this.state.data.onboard === 'done') {
+      this.petSkills.update(dt, now, night);
+      this.pet.update(dt, { player: this.player, night, doghouse: { x: dh.x, z: dh.z, rotY: dh.rotY }, treasures: this.pet.species === 'corgi' ? this.state.data.treasure.spots : [], followDist: this.petTuning.followDist });
+    }
+    this.showcaseTick?.(dt);
+    if (this.growT > 0) { this.growT -= dt; if (this.growT <= 0) this.stage.closeUp(null); }
+    if (!this.mower.active && !this.onboarding) this.runQueue();
     if (this.current?.kind === 'weed' && this.player.animName === 'pull') {
       const u = this.player.animT;
       this.weeds.setTug(this.current.id, u < 0.25 ? 0 : u < 0.66 ? (u - 0.25) / 0.41 : 0);

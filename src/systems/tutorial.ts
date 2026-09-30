@@ -10,11 +10,11 @@ interface Step {
   target: (g: Game) => THREE.Vector3 | null;
 }
 
-const LETTER = `
+const LETTER = (pet: string) => `
   <p>親愛的孩子：</p>
   <p>奶奶年紀大了，這座農場就交給你了。</p>
   <p>房子周圍的草長得好高，田也荒了好久，</p>
-  <p>不過別擔心，<b>麻糬</b>會陪著你，</p>
+  <p>不過別擔心，<b>${pet}</b>會陪著你，</p>
   <p>牧場裡的<b>花花</b>也很期待見到你。</p>
   <p>慢慢來，把這裡變回熱鬧的家吧！</p>
   <p class="sign">—— 愛你的奶奶 🌻</p>`;
@@ -67,7 +67,7 @@ export class Tutorial {
         target: (g) => plotWhere(g, (i) => !!g.farm.plot(i).cropId),
       },
       {
-        hint: '🐶 等蘿蔔長大的時候，點麻糬摸摸牠',
+        hint: '🐾 等蘿蔔長大的時候，點你的寵物摸摸牠',
         done: (g) => g.state.data.pet.bond >= 10 || g.state.data.stats.harvests > 0,
         target: (g) => g.pet.root.position.clone().setY(1.3),
       },
@@ -96,7 +96,7 @@ export class Tutorial {
     const d = this.game.state.data;
     if (d.tutorial !== 0) return;
     sfx.paper();
-    await this.game.hud.letter(LETTER, '開始整理農場 🌱');
+    await this.game.hud.letter(LETTER(this.game.pet.name), '開始整理農場 🌱');
     sfx.ui();
     d.tutorial = 1;
   }

@@ -31,11 +31,33 @@ const REST: Pose = { y: 0, sy: 1, lean: 0, twist: 0, aLx: 0, aLz: 0.08, aRx: 0, 
 
 const rim = (c: string, o: THREE.MeshStandardMaterialParameters = {}) => withRim(mat(c, { roughness: 0.62, ...o }), 0.18);
 
+// 主角外觀（docs/02 §1）
+export type HairStyle = 'short' | 'bob' | 'ponytail' | 'pigtails' | 'spiky' | 'bun';
+export interface Look { body: 'round' | 'tall'; skin: number; hair: HairStyle; hairColor: number; outfit: number; shirt: number; hat: boolean }
+export const LOOK_PALETTE = {
+  skin: ['#ffe0c8', '#ffd1b0', '#f2b894', '#d99a6c', '#b87a50', '#8a5634'],
+  hair: ['#6b3f25', '#3a2418', '#1f1a18', '#d8a24a', '#f0d27a', '#c0503a', '#e87aa0', '#6a8ad8', '#8a5ac8', '#f4f0e8', '#8a8a8a', '#4a9a6a'],
+  outfit: ['#4a7bc8', '#3f9a5a', '#c85a4a', '#8a5ac8', '#e8a03a', '#5a5a6a', '#e87aa0', '#3aa8b8'],
+  shirt: ['#e8604c', '#f4f0e8', '#f2c94c', '#6ab8e8', '#8ad86a', '#e87aa0', '#8a6ad8', '#3a3a44'],
+};
+export const HAIR_STYLES: { id: HairStyle; label: string }[] = [
+  { id: 'short', label: '短髮' }, { id: 'bob', label: '鮑伯頭' }, { id: 'ponytail', label: '馬尾' },
+  { id: 'pigtails', label: '雙馬尾' }, { id: 'spiky', label: '刺刺頭' }, { id: 'bun', label: '包包頭' },
+];
+export const DEFAULT_LOOK: Look = { body: 'round', skin: 1, hair: 'short', hairColor: 0, outfit: 0, shirt: 0, hat: true };
+
 export class Player {
   root = new THREE.Group();
   mover: Mover;
   manual = new THREE.Vector2(); // WASD 輸入（已轉成世界方向）
+  private shape = new THREE.Group(); // 體型縮放（不影響動畫）
   private body = new THREE.Group();
+  private hairGroup = new THREE.Group();
+  private hatGroup = new THREE.Group();
+  private mats = {
+    skin: rim('#ffd1b0'), overall: rim('#4a7bc8'), shirt: rim('#e8604c'), hair: rim('#6b3f25'),
+  };
+  look: Look = { ...DEFAULT_LOOK };
   private head = new THREE.Group();
   private armL = new THREE.Group();
   private armR = new THREE.Group();
@@ -67,16 +89,14 @@ export class Player {
   get animT(): number { return this.anim ? this.anim.t / ANIM_SPEC[this.anim.name].dur : 0; }
 
   private build() {
-    const skin = rim('#ffd1b0');
-    const overall = rim('#4a7bc8');
-    const shirt = rim('#e8604c');
-    const hair = rim('#6b3f25');
+    const { skin, overall, shirt } = this.mats;
     const shoe = rim('#7a4a2e');
     const straw = rim('#f2cf78', { roughness: 0.8 });
     const eye = mat('#1e1512', { roughness: 0.15 });
     const white = mat('#ffffff', { emissive: '#ffffff', emissiveIntensity: 0.6 });
 
-    this.root.add(this.body);
+    this.root.add(this.shape);
+    this.shape.add(this.body);
     // 腿
     for (const [leg, sx] of [[this.legL, 1], [this.legR, -1]] as const) {
       leg.position.set(sx * 0.12, 0.3, 0);
@@ -127,14 +147,8 @@ export class Player {
     const skull = mesh(GEO.sphere, skin);
     skull.scale.setScalar(0.68);
     skull.position.y = 0.28;
-    const hairCap = mesh(GEO.sphere, hair);
-    hairCap.scale.set(0.7, 0.6, 0.7);
-    hairCap.position.set(0, 0.37, -0.04);
-    const bangs = mesh(GEO.sphere, hair);
-    bangs.scale.set(0.5, 0.2, 0.3);
-    bangs.position.set(0.05, 0.5, 0.2);
-    bangs.rotation.z = -0.3;
-    this.head.add(skull, hairCap, bangs);
+    this.head.add(skull, this.hairGroup, this.hatGroup);
+    this.buildHair('short');
     for (const sx of [-1, 1]) {
       const e = new THREE.Group();
       e.position.set(sx * 0.12, 0.27, 0.3);
@@ -170,7 +184,7 @@ export class Player {
     const band = mesh(GEO.cyl, mat('#d8453c'));
     band.scale.set(0.57, 0.06, 0.57);
     band.position.y = 0.58;
-    this.head.add(brim, crown, band);
+    this.hatGroup.add(brim, crown, band);
 
     // 手持工具
     const woodM = mat('#a87a4c');
@@ -221,6 +235,66 @@ export class Player {
     const fertbag = mesh(GEO.sphere, mat('#7a9a4a')); fertbag.scale.set(0.2, 0.24, 0.18); fertbag.position.y = -0.08;
     this.tools = { hoe, can, bag, sickle, hay, brush: brushT, axe, pick, fertbag };
     for (const t of Object.values(this.tools)) { t.visible = false; this.handR.add(t); }
+  }
+
+  setLook(look: Look): void {
+    const P = LOOK_PALETTE;
+    if (look.hair !== this.look.hair || !this.hairGroup.children.length) this.buildHair(look.hair);
+    this.look = { ...look };
+    this.mats.skin.color.set(P.skin[look.skin] ?? P.skin[1]);
+    this.mats.hair.color.set(P.hair[look.hairColor] ?? P.hair[0]);
+    this.mats.overall.color.set(P.outfit[look.outfit] ?? P.outfit[0]);
+    this.mats.shirt.color.set(P.shirt[look.shirt] ?? P.shirt[0]);
+    this.hatGroup.visible = look.hat;
+    // 高挑款：身體拉長、頭相對小一點
+    if (look.body === 'tall') { this.shape.scale.set(0.95, 1.12, 0.95); this.head.scale.setScalar(0.92); }
+    else { this.shape.scale.set(1.04, 1, 1.04); this.head.scale.setScalar(1); }
+  }
+
+  private buildHair(style: HairStyle) {
+    const g = this.hairGroup;
+    g.clear();
+    const hair = this.mats.hair;
+    const add = (sx: number, sy: number, sz: number, x: number, y: number, z: number, geo: THREE.BufferGeometry = GEO.sphere, rx = 0, rz = 0) => {
+      const m = mesh(geo, hair);
+      m.scale.set(sx, sy, sz);
+      m.position.set(x, y, z);
+      m.rotation.set(rx, 0, rz);
+      g.add(m);
+      return m;
+    };
+    const tie = (x: number, y: number, z: number) => { const t = mesh(GEO.sphereLo, mat('#e8504a'), false); t.scale.setScalar(0.07); t.position.set(x, y, z); g.add(t); };
+    add(0.7, 0.6, 0.7, 0, 0.37, -0.04); // 頭頂髮帽
+    switch (style) {
+      case 'short':
+        add(0.5, 0.2, 0.3, 0.05, 0.5, 0.2, GEO.sphere, 0, -0.3);
+        break;
+      case 'bob':
+        add(0.74, 0.62, 0.74, 0, 0.35, -0.04);
+        for (const sx of [-1, 1]) add(0.22, 0.4, 0.34, sx * 0.29, 0.18, -0.02);
+        add(0.58, 0.16, 0.26, 0, 0.47, 0.21);
+        break;
+      case 'ponytail':
+        add(0.5, 0.2, 0.3, -0.05, 0.5, 0.2, GEO.sphere, 0, 0.3);
+        add(0.16, 0.2, 0.16, 0, 0.26, -0.4, GEO.capsule, 0.6);
+        tie(0, 0.42, -0.32);
+        break;
+      case 'pigtails':
+        add(0.56, 0.16, 0.26, 0, 0.47, 0.21);
+        for (const sx of [-1, 1]) { add(0.14, 0.18, 0.14, sx * 0.38, 0.2, -0.08, GEO.capsule, 0, sx * 0.5); tie(sx * 0.32, 0.36, -0.06); }
+        break;
+      case 'spiky':
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI - Math.PI / 2;
+          add(0.12, 0.22, 0.12, Math.sin(a) * 0.24, 0.58, 0.1 + Math.cos(a) * 0.12, GEO.cone, 0.5 + Math.cos(a) * 0.3, -Math.sin(a) * 0.6);
+        }
+        break;
+      case 'bun':
+        add(0.56, 0.16, 0.26, 0, 0.47, 0.21);
+        add(0.3, 0.3, 0.3, 0, 0.66, -0.12);
+        tie(0, 0.56, -0.12);
+        break;
+    }
   }
 
   // 播放動作；onImpact 在作用點觸發，onDone 在動作結束
