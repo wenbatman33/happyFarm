@@ -2,6 +2,10 @@
 
 皮克斯風 3D 療癒農場養成網頁遊戲，PC 與手機瀏覽器都能玩。規劃文件在 [`docs/`](docs/00-專案總覽.md)。
 
+**線上試玩**：https://wenbatman33.github.io/happyFarm/ （網址加 `?dev=1` 開啟 DEV 微調工具）
+
+推到 `main` 會由 GitHub Actions 自動建置並部署（`.github/workflows/deploy.yml`）。
+
 ## 目前進度：M0 技術原型
 
 - Three.js 皮克斯風光影：Neutral 色調映射、柔和陰影、N8AO 環境光遮蔽、Bloom、暗角
