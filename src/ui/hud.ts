@@ -1,5 +1,8 @@
 import type { HudKey, Layout } from '../config/layout';
 import { MILK_SELL, xpNext } from '../data/economy';
+import { RECIPES } from '../data/recipes';
+import { TREES } from '../data/trees';
+import { GIANTS } from '../data/crops';
 import { SEASON_LABEL, type Season } from '../core/clock';
 
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
@@ -17,7 +20,12 @@ export const ITEM_INFO: Record<string, { name: string; emoji: string; price: num
   wood: { name: '木材', emoji: '🪵', price: 3 },
   stone: { name: '石材', emoji: '🪨', price: 3 },
   fert: { name: '有機肥', emoji: '🧪', price: 20 },
+  giantseed: { name: '巨型種子', emoji: '🌰', price: 0 },
 };
+// 加工品、水果、巨型作物
+for (const r of RECIPES) ITEM_INFO[r.id] = { name: r.name, emoji: r.emoji, price: r.sell };
+for (const t of TREES) ITEM_INFO[t.id] = { name: t.name, emoji: t.emoji, price: t.sell };
+for (const g of GIANTS) ITEM_INFO[g.id] = { name: g.name, emoji: g.emoji, price: g.sell };
 
 // 通用的動作選單項目（牛、堆肥桶、房子共用）
 export interface MenuItem { act: string; emoji: string; label: string; enabled: boolean; note: string }
@@ -48,6 +56,7 @@ export class Hud {
   onMute?: () => void;
   onSell?: () => void;
   onMow?: () => void;
+  onJournal?: () => void;
   onMenuAct?: (key: string, act: string) => void;
   onDeliver?: (id: string) => void;
   onSkip?: (id: string) => void;
@@ -73,6 +82,7 @@ export class Hud {
       </div>
       <div class="hud-el" data-hud="toolbar"><div class="seeds"></div></div>
       <div class="hud-el" data-hud="bag">
+        <button class="round-btn jn-btn" title="農場手帳 (J)"><span>📔</span><i class="badge hidden">0</i></button>
         <button class="round-btn mow-btn" title="除草機 (R)"><span>🚜</span></button>
         <button class="round-btn pet-btn" title="麻糬"><span>🐶</span><i class="bond"></i></button>
         <button class="round-btn bag-btn" title="背包 (B)"><span>🎒</span><i class="badge hidden">0</i></button>
@@ -86,6 +96,7 @@ export class Hud {
     $('.pet-btn', this.root).onclick = () => this.onPet?.();
     $('.mute', this.root).onclick = () => this.onMute?.();
     $('.mow-btn', this.root).onclick = () => this.onMow?.();
+    $('.jn-btn', this.root).onclick = () => this.onJournal?.();
     // 工具列：滑鼠滾輪橫向捲動
     const seeds = $('.seeds', this.root);
     seeds.addEventListener('wheel', (e) => { seeds.scrollLeft += e.deltaY; e.preventDefault(); }, { passive: false });
@@ -246,8 +257,14 @@ export class Hud {
     $('.pet-btn', this.root).classList.toggle('glow', touchesLeft > 0);
   }
 
+  setJournalBadge(n: number): void {
+    const b = $('.jn-btn .badge', this.root);
+    b.textContent = String(n);
+    b.classList.toggle('hidden', n <= 0);
+  }
+
   setBagCount(n: number): void {
-    const b = $('.badge', this.root);
+    const b = $('.bag-btn .badge', this.root);
     b.textContent = String(n);
     b.classList.toggle('hidden', n <= 0);
   }

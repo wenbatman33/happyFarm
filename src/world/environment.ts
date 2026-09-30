@@ -43,6 +43,12 @@ export class World {
   private troughHay!: THREE.Object3D;
   private scaffold: THREE.Group | null = null;
   private mailFlag!: THREE.Object3D;
+  private decorIds: string[] = [];
+  private decorSeason: Season = 'autumn';
+  private scarecrow: THREE.Group | null = null;
+  private wreath: THREE.Group | null = null;
+  workshopBusy = false;
+  private wsSmokeT = 0;
   onRebuildGrid?: () => void; // 讓其他系統（障礙物）補上自己的阻擋格
 
   constructor(scene: THREE.Scene, private grid: Grid, private layout: SceneLayout) {
@@ -56,6 +62,7 @@ export class World {
     this.addProp('doghouse', this.makeDoghouse(), layout.doghouse);
     this.addProp('mailbox', this.makeMailbox(), layout.mailbox);
     this.addProp('compost', this.makeCompost(), layout.compost);
+    this.addProp('workshop', this.makeWorkshop(), layout.workshop);
     this.buildRanch();
     layout.trees.forEach((t, i) => this.addProp(`tree${i}`, this.makeTree(i), t));
     layout.rocks.forEach((r, i) => this.addProp(`rock${i}`, this.makeRock(i), r));
@@ -89,7 +96,9 @@ export class World {
     const g = this.grid;
     g.clear();
     const L = this.layout;
-    g.blockRect(L.house.x, L.house.z, 6 * L.house.scale, 5 * L.house.scale);
+    if (this.houseTier >= 3) g.blockRect(L.house.x - 1.1, L.house.z, 8.2 * L.house.scale, 5 * L.house.scale); // T3 左側加蓋
+    else g.blockRect(L.house.x, L.house.z, 6 * L.house.scale, 5 * L.house.scale);
+    g.blockRect(L.workshop.x, L.workshop.z, 2.6, 2.2);
     g.blockRect(L.doghouse.x, L.doghouse.z, 1.3, 1.3);
     g.blockRect(L.mailbox.x, L.mailbox.z, 0.3, 0.3);
     g.blockRect(L.compost.x, L.compost.z, 0.6, 0.6);
@@ -280,6 +289,8 @@ export class World {
     }
     this.grass.instanceMatrix.needsUpdate = true;
   }
+
+  get leafColor(): THREE.Color { return this.leafMats[0].color; }
 
   applySeason(season: Season): void {
     this.season = season;
@@ -552,6 +563,9 @@ export class World {
     entry.obj = h;
     this.root.add(h);
     this.placeProp('house');
+    this.wreath = null;
+    this.setDecor(this.decorIds, this.decorSeason);
+    this.rebuildGrid();
   }
 
   private makeHouse(tier: number): THREE.Group {
@@ -559,10 +573,11 @@ export class World {
     g.userData.kind = 'house';
     this.interactive.push(g);
     const worn = tier === 1;
-    const wall = mat(worn ? '#c28d5e' : '#d69a62', { roughness: 0.85 });
-    const wallDark = mat(worn ? '#a8744a' : '#bd8350', { roughness: 0.85 });
+    const t3 = tier >= 3;
+    const wall = mat(worn ? '#c28d5e' : t3 ? '#f2e2c4' : '#d69a62', { roughness: 0.85 });
+    const wallDark = mat(worn ? '#a8744a' : t3 ? '#e2cda4' : '#bd8350', { roughness: 0.85 });
     const trim = mat('#f3e7d3', { roughness: 0.6 });
-    const roofMat = mat(worn ? '#a8604c' : '#c9553c', { roughness: 0.7 });
+    const roofMat = mat(worn ? '#a8604c' : t3 ? '#c9453a' : '#c9553c', { roughness: 0.7 });
     const stone = mat('#b9ad9c', { roughness: 0.95 });
     const W = 5.4, H = 2.5, D = 4.2, base = 0.35;
 
@@ -690,6 +705,8 @@ export class World {
       matt.position.set(0, 0.42, fz + 0.75);
       g.add(matt);
     }
+    if (t3) this.addT3Extras(g, { W, H, D, base, wall, wallDark, trim, roofMat, stone });
+    g.userData.door = new THREE.Vector3(0, base + 1.45, fz + 0.2);
     // 燈籠柱
     const lp = mesh(rbox(0.12, 1.6, 0.12, 0.04), mat('#5a4a3a'));
     lp.position.set(1.9, 0.8, fz + 0.8);
@@ -712,6 +729,142 @@ export class World {
         }
       }
     }
+    return g;
+  }
+
+  // T3 紅頂農舍：左側加蓋一間、門廊加屋頂與搖椅
+  private addT3Extras(g: THREE.Group, o: { W: number; H: number; D: number; base: number; wall: THREE.Material; wallDark: THREE.Material; trim: THREE.Material; roofMat: THREE.Material; stone: THREE.Material }) {
+    const wing = new THREE.Group();
+    wing.position.set(-o.W / 2 - 1.1, 0, -0.5);
+    const ww = 2.3, wh = 2.0, wd = 3.1;
+    const f = mesh(rbox(ww + 0.3, o.base, wd + 0.3, 0.08), o.stone); f.position.y = o.base / 2;
+    const b = mesh(rbox(ww, wh, wd, 0.1), o.wall); b.position.y = o.base + wh / 2;
+    wing.add(f, b);
+    for (let i = 0; i < 4; i++) { const pl = mesh(rbox(ww + 0.03, 0.06, wd + 0.03, 0.02), i % 2 ? o.wall : o.wallDark, false); pl.position.y = o.base + 0.25 + i * 0.42; wing.add(pl); }
+    for (const s of [1, -1]) {
+      const r = mesh(rbox(1.9, 0.2, wd + 0.5, 0.08), o.roofMat);
+      r.position.set(s * 0.72, o.base + wh + 0.5, 0);
+      r.rotation.z = -s * 0.55;
+      wing.add(r);
+    }
+    const tri = new THREE.Shape();
+    tri.moveTo(-ww / 2, 0); tri.lineTo(ww / 2, 0); tri.lineTo(0, 0.95); tri.closePath();
+    const tg = new THREE.ExtrudeGeometry(tri, { depth: wd - 0.1, bevelEnabled: false });
+    const gable = mesh(tg, o.wall); gable.position.set(0, o.base + wh, -wd / 2 + 0.05); wing.add(gable);
+    // 側翼的圓窗
+    const win = mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.08, 20), o.trim); win.rotation.x = Math.PI / 2; win.position.set(0, o.base + 1.2, wd / 2 + 0.03);
+    const glass = mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.06, 20), (this.windowMats[0] ?? o.trim) as THREE.Material, false); glass.rotation.x = Math.PI / 2; glass.position.set(0, o.base + 1.2, wd / 2 + 0.06);
+    wing.add(win, glass);
+    g.add(wing);
+    // 門廊屋頂＋柱子
+    const fz = o.D / 2;
+    const roof = mesh(rbox(3.6, 0.14, 1.5, 0.05), o.roofMat); roof.position.set(0, 2.45, fz + 0.85); roof.rotation.x = 0.18;
+    g.add(roof);
+    for (const sx of [-1.55, 1.55]) { const post = mesh(rbox(0.14, 2.2, 0.14, 0.05), o.trim); post.position.set(sx, 1.4, fz + 1.35); g.add(post); }
+    // 搖椅
+    const chair = new THREE.Group();
+    chair.position.set(-1.05, 0.4, fz + 0.75);
+    chair.rotation.y = 0.5;
+    const wood = mat('#8a5a3a');
+    const seat = mesh(rbox(0.55, 0.07, 0.5, 0.03), wood); seat.position.y = 0.32;
+    const back = mesh(rbox(0.55, 0.6, 0.06, 0.03), wood); back.position.set(0, 0.62, -0.24); back.rotation.x = -0.15;
+    for (const sx of [-0.25, 0.25]) {
+      const rocker = mesh(new THREE.TorusGeometry(0.4, 0.03, 6, 16, Math.PI * 0.6), wood); rocker.rotation.set(0, Math.PI / 2, Math.PI * 1.2); rocker.position.set(sx, 0.42, 0.05);
+      chair.add(rocker);
+    }
+    const cushion = mesh(rbox(0.46, 0.06, 0.42, 0.03), mat('#e87a6a')); cushion.position.y = 0.37;
+    chair.add(seat, back, cushion);
+    g.add(chair);
+    g.userData.chair = chair;
+  }
+
+  // ---------- 加工坊 ----------
+  private makeWorkshop(): THREE.Group {
+    const g = new THREE.Group();
+    g.userData.kind = 'workshop';
+    this.interactive.push(g);
+    const wall = mat('#e9d2a8', { roughness: 0.85 }), wood = mat('#a8744a'), roof = mat('#5f8a4a', { roughness: 0.7 }), stone = mat('#b9ad9c', { roughness: 0.95 });
+    const f = mesh(rbox(2.7, 0.3, 2.3, 0.08), stone); f.position.y = 0.15;
+    const b = mesh(rbox(2.4, 1.7, 2.0, 0.1), wall); b.position.y = 0.3 + 0.85;
+    g.add(f, b);
+    for (const sx of [-1.2, 1.2]) for (const sz of [-1, 1]) { const post = mesh(rbox(0.16, 1.8, 0.16, 0.05), wood); post.position.set(sx, 1.15, sz); g.add(post); }
+    for (const s of [1, -1]) { const r = mesh(rbox(2.9, 0.16, 1.45, 0.06), roof); r.position.set(0, 2.35, s * 0.55); r.rotation.x = s * 0.52; g.add(r); }
+    const tri = new THREE.Shape(); tri.moveTo(-1.2, 0); tri.lineTo(1.2, 0); tri.lineTo(0, 0.75); tri.closePath();
+    const gable = mesh(new THREE.ExtrudeGeometry(tri, { depth: 1.9, bevelEnabled: false }), wall); gable.position.set(0, 2.0, -0.95); g.add(gable);
+    // 大窗戶（夜晚亮燈）與門
+    const glassMat = mat('#9ec9e8', { roughness: 0.15, emissive: '#ffbf66', emissiveIntensity: 0 });
+    this.windowMats.push(glassMat);
+    const winF = mesh(rbox(1.0, 0.7, 0.1, 0.04), mat('#f3e7d3')); winF.position.set(0.45, 1.35, 1.02);
+    const win = mesh(rbox(0.82, 0.54, 0.06, 0.02), glassMat, false); win.position.set(0.45, 1.35, 1.06);
+    const door = mesh(rbox(0.6, 1.2, 0.08, 0.04), wood); door.position.set(-0.6, 0.9, 1.04);
+    g.add(winF, win, door);
+    // 招牌、煙囪、木桶
+    const sign = mesh(rbox(1.1, 0.34, 0.06, 0.04), mat('#7a4a2e')); sign.position.set(0, 2.05, 1.12);
+    const bread = mesh(GEO.sphere, mat('#e8b060')); bread.scale.set(0.34, 0.16, 0.2); bread.position.set(0, 2.06, 1.17);
+    const chim = mesh(rbox(0.4, 0.9, 0.4, 0.06), stone); chim.position.set(0.8, 2.6, -0.4);
+    g.add(sign, bread, chim);
+    g.userData.chimneyTop = new THREE.Vector3(0.8, 3.1, -0.4);
+    const barrel = mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.55, 14), wood); barrel.position.set(1.55, 0.3, 0.6);
+    const crate = mesh(rbox(0.45, 0.4, 0.45, 0.04), mat('#c89b62')); crate.position.set(1.5, 0.22, -0.2);
+    g.add(barrel, crate);
+    return g;
+  }
+
+  // ---------- 季節手帳的限定裝飾 ----------
+  setDecor(ids: string[], season: Season): void {
+    this.decorIds = [...ids];
+    this.decorSeason = season;
+    const last = (kind: string) => [...ids].reverse().find((x) => x.startsWith(kind + '_'));
+    const sc = last('scarecrow'), wr = last('wreath');
+    if (this.scarecrow) { this.root.remove(this.scarecrow); this.scarecrow = null; }
+    if (sc) {
+      this.scarecrow = this.makeScarecrow(sc.split('_')[1] as Season);
+      const f = this.layout.field;
+      this.scarecrow.position.set(f.x - 1.3, 0, f.z + 5.8);
+      this.root.add(this.scarecrow);
+    }
+    const house = this.props.get('house')!.obj;
+    if (this.wreath) { this.wreath.parent?.remove(this.wreath); this.wreath = null; }
+    if (wr) {
+      this.wreath = this.makeWreath(wr.split('_')[1] as Season);
+      this.wreath.position.copy(house.userData.door as THREE.Vector3);
+      house.add(this.wreath);
+    }
+  }
+
+  private makeScarecrow(s: Season): THREE.Group {
+    const g = new THREE.Group();
+    const wood = mat('#8a5a3a'), straw = mat('#f2cf78', { roughness: 0.9 }), sack = mat('#e8d4a8', { roughness: 0.95 });
+    const scarf = mat({ spring: '#f4a0c0', summer: '#ffd84a', autumn: '#e8703a', winter: '#d8453c' }[s]);
+    const shirt = mat({ spring: '#8ad86a', summer: '#6ab8e8', autumn: '#c8783a', winter: '#5a7fbf' }[s]);
+    const pole = mesh(GEO.cyl, wood); pole.scale.set(0.08, 2.0, 0.08); pole.position.y = 1.0;
+    const arm = mesh(GEO.cyl, wood); arm.scale.set(0.06, 1.5, 0.06); arm.rotation.z = Math.PI / 2; arm.position.y = 1.35;
+    const body = mesh(rbox(0.7, 0.7, 0.34, 0.12), shirt); body.position.y = 1.2;
+    const head = mesh(GEO.sphere, sack); head.scale.setScalar(0.46); head.position.y = 1.85;
+    const sc = mesh(new THREE.TorusGeometry(0.2, 0.06, 6, 16), scarf); sc.rotation.x = Math.PI / 2; sc.position.y = 1.6;
+    const brim = mesh(GEO.cyl, straw); brim.scale.set(0.7, 0.03, 0.7); brim.position.y = 2.06;
+    const crown = mesh(GEO.sphere, straw); crown.scale.set(0.38, 0.28, 0.38); crown.position.y = 2.12;
+    g.add(pole, arm, body, head, sc, brim, crown);
+    for (const sx of [-1, 1]) {
+      const e = mesh(GEO.sphereLo, mat('#2a1c18'), false); e.scale.setScalar(0.05); e.position.set(sx * 0.09, 1.9, 0.21); g.add(e);
+      const t = mesh(GEO.cone, straw); t.scale.set(0.12, 0.2, 0.12); t.rotation.z = sx * Math.PI / 2; t.position.set(sx * 0.8, 1.35, 0); g.add(t);
+    }
+    const mouth = mesh(rbox(0.16, 0.02, 0.02, 0.005), mat('#2a1c18'), false); mouth.position.set(0, 1.78, 0.22); g.add(mouth);
+    if (s === 'winter') { const snow = mesh(GEO.sphere, mat('#f7fbff')); snow.scale.set(0.5, 0.12, 0.5); snow.position.y = 2.2; g.add(snow); }
+    return g;
+  }
+
+  private makeWreath(s: Season): THREE.Group {
+    const g = new THREE.Group();
+    const cols = { spring: ['#f6b8d0', '#8ad86a'], summer: ['#ffd84a', '#5fbf49'], autumn: ['#e8603a', '#f2b447'], winter: ['#2f7a3a', '#d8453c'] }[s];
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
+      const l = mesh(GEO.sphereLo, mat(cols[i % 2]), false);
+      l.scale.set(0.14, 0.14, 0.08);
+      l.position.set(Math.cos(a) * 0.26, Math.sin(a) * 0.26, 0);
+      g.add(l);
+    }
+    const bow = mesh(GEO.sphereLo, mat('#d8453c'), false); bow.scale.set(0.2, 0.1, 0.06); bow.position.set(0, -0.28, 0.04); g.add(bow);
     return g;
   }
 
@@ -829,6 +982,23 @@ export class World {
       c.position.x += c.userData.speed * dt;
       if (c.position.x > 130) c.position.x = -130;
     }
+    // 加工坊運作中：煙囪冒煙
+    if (this.workshopBusy) {
+      this.wsSmokeT -= dt;
+      if (this.wsSmokeT <= 0) {
+        this.wsSmokeT = 0.6;
+        const w = this.props.get('workshop')!;
+        const top = (w.obj.userData.chimneyTop as THREE.Vector3).clone().applyMatrix4(w.obj.matrixWorld);
+        const m = mesh(GEO.sphereLo, this.smokeMat, false);
+        m.position.copy(top);
+        m.scale.setScalar(0.22);
+        this.root.add(m);
+        this.smoke.push({ m, life: 0 });
+      }
+    }
+    // 搖椅輕輕搖
+    const chair = this.props.get('house')?.obj.userData.chair as THREE.Object3D | undefined;
+    if (chair) chair.rotation.x = Math.sin(t * 1.4) * 0.06;
     // 煙囪冒煙（修繕後才有）
     if (this.houseTier >= 2) {
       this.smokeTimer -= dt;

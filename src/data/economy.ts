@@ -43,6 +43,11 @@ export const COMPOST_SLOTS = 3;
 
 // 房屋修繕 T2（03 §2）
 export const HOUSE_T2 = { level: 8, coins: 3000, wood: 20, ms: 3600000 };
+// 各階段升級條件（升到該階段）
+export const HOUSE_TIERS: Record<number, { level: number; coins: number; wood: number; stone: number; ms: number; name: string }> = {
+  2: { level: 8, coins: 3000, wood: 20, stone: 0, ms: 3600000, name: '修繕小木屋' },
+  3: { level: 25, coins: 40000, wood: 80, stone: 40, ms: 8 * 3600000, name: '紅頂農舍' },
+};
 
 export const nextPlotUnlockLevel = (level: number): number | null => {
   for (const [lv] of PLOT_TABLE) if (lv > level) return lv;

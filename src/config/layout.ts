@@ -66,6 +66,7 @@ export interface SceneLayout {
   mailbox: PropPlacement;
   compost: PropPlacement;
   ranch: PropPlacement; // 牧場柵欄中心（外框 6×5 公尺，東側開門）
+  workshop: PropPlacement; // 加工坊（Lv15）
   trees: PropPlacement[];
   rocks: PropPlacement[];
 }
@@ -79,7 +80,8 @@ export const SCENE_LAYOUT: SceneLayout = {
   mailbox: p(1.3, -1.4, -0.3),
   compost: p(-4.6, -0.8, 0.2),
   ranch: p(-8, 4.5),
-  trees: [p(-9, -9, 0, 1.25), p(9, -9, 0.8, 1.05), p(-12.4, 0.8, 1.2, 1.15), p(11, 7, 2.1, 1.3), p(-8, 10, 0.3, 0.95), p(8.5, 11, 1.7, 1.05), p(-12, -4, 2.5, 1), p(12, -3, 0.9, 0.9)],
+  workshop: p(5.6, -5.4),
+  trees: [p(-9, -9, 0, 1.25), p(4.2, -11.8, 0.8, 1.05), p(-12.4, 0.8, 1.2, 1.15), p(11, 7, 2.1, 1.3), p(-8, 10, 0.3, 0.95), p(8.5, 11, 1.7, 1.05), p(-12, -4, 2.5, 1), p(12, -3, 0.9, 0.9)],
   rocks: [p(-3.5, 6, 0.3, 1), p(6, -2, 1.2, 0.8), p(-9.6, 8.8, 2, 1.2), p(10, 2, 0.5, 0.9), p(-2, 11, 1.1, 0.7)],
 };
 

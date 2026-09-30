@@ -4,6 +4,7 @@ import { GEO, mat, mesh, withRim } from '../world/materials';
 import type { Grid } from '../world/grid';
 import { tileOf } from '../world/grid';
 import { Mover } from './mover';
+import { node } from '../world/models';
 import { clamp, lerp } from '../core/rng';
 
 export type ActionAnim = 'pull' | 'hoe' | 'plant' | 'water' | 'harvest' | 'pet' | 'sickle' | 'celebrate' | 'feed' | 'brush' | 'milk' | 'chop' | 'mine' | 'fert';
@@ -46,24 +47,32 @@ export const HAIR_STYLES: { id: HairStyle; label: string }[] = [
 ];
 export const DEFAULT_LOOK: Look = { body: 'round', skin: 1, hair: 'short', hairColor: 0, outfit: 0, shirt: 0, hat: true };
 
+interface Parts {
+  body: THREE.Object3D; head: THREE.Object3D; armL: THREE.Object3D; armR: THREE.Object3D; legL: THREE.Object3D; legR: THREE.Object3D; handR: THREE.Object3D;
+  eyes: THREE.Object3D[]; hair: THREE.Object3D; hat: THREE.Object3D; hairMap: Partial<Record<HairStyle, THREE.Object3D>> | null;
+  mats: { skin: THREE.MeshStandardMaterial; overall: THREE.MeshStandardMaterial; shirt: THREE.MeshStandardMaterial; hair: THREE.MeshStandardMaterial };
+}
+
 export class Player {
   root = new THREE.Group();
   mover: Mover;
   manual = new THREE.Vector2(); // WASD 輸入（已轉成世界方向）
   private shape = new THREE.Group(); // 體型縮放（不影響動畫）
-  private body = new THREE.Group();
-  private hairGroup = new THREE.Group();
-  private hatGroup = new THREE.Group();
-  private mats = {
+  private body: THREE.Object3D = new THREE.Group();
+  private hairGroup: THREE.Object3D = new THREE.Group();
+  private hatGroup: THREE.Object3D = new THREE.Group();
+  private mats: { skin: THREE.MeshStandardMaterial; overall: THREE.MeshStandardMaterial; shirt: THREE.MeshStandardMaterial; hair: THREE.MeshStandardMaterial } = {
     skin: rim('#ffd1b0'), overall: rim('#4a7bc8'), shirt: rim('#e8604c'), hair: rim('#6b3f25'),
   };
+  private glbHair: Partial<Record<HairStyle, THREE.Object3D>> | null = null;
+  private procParts: Parts | null = null;
   look: Look = { ...DEFAULT_LOOK };
-  private head = new THREE.Group();
-  private armL = new THREE.Group();
-  private armR = new THREE.Group();
-  private legL = new THREE.Group();
-  private legR = new THREE.Group();
-  private handR = new THREE.Group();
+  private head: THREE.Object3D = new THREE.Group();
+  private armL: THREE.Object3D = new THREE.Group();
+  private armR: THREE.Object3D = new THREE.Group();
+  private legL: THREE.Object3D = new THREE.Group();
+  private legR: THREE.Object3D = new THREE.Group();
+  private handR: THREE.Object3D = new THREE.Group();
   private eyes: THREE.Object3D[] = [];
   private tools: Record<string, THREE.Object3D> = {};
   private pose: Pose = { ...REST };
@@ -237,9 +246,54 @@ export class Player {
     for (const t of Object.values(this.tools)) { t.visible = false; this.handR.add(t); }
   }
 
+  // 切換成 Blender GLB 模型（src＝null 則回到程式建模）
+  useModel(src: THREE.Object3D | null): void {
+    if (!this.procParts) this.procParts = this.parts();
+    if (!src) { this.setParts(this.procParts); return; }
+    const root = src.clone(true);
+    const need = ['body', 'head', 'armL', 'armR', 'legL', 'legR'];
+    if (need.some((n) => !node(root, n))) { console.warn('[模型] 主角 GLB 缺少必要節點，沿用程式建模'); return; }
+    // 材質依名稱取出（每次 clone 都複製一份，才能各自換色）
+    const mats: Record<string, THREE.MeshStandardMaterial> = {};
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const mm = m.material as THREE.MeshStandardMaterial;
+      if (!mats[mm.name]) mats[mm.name] = withRim(mm.clone(), 0.18);
+      m.material = mats[mm.name];
+    });
+    const head = node(root, 'head')!;
+    const hairMap: Partial<Record<HairStyle, THREE.Object3D>> = {};
+    for (const h of HAIR_STYLES) { const n = node(root, `hair_${h.id}`); if (n) hairMap[h.id] = n; }
+    let handR = node(root, 'handR');
+    if (!handR) { handR = new THREE.Object3D(); handR.position.set(0, -0.36, 0.02); node(root, 'armR')!.add(handR); }
+    this.setParts({
+      body: node(root, 'body')!, head, armL: node(root, 'armL')!, armR: node(root, 'armR')!, legL: node(root, 'legL')!, legR: node(root, 'legR')!, handR,
+      eyes: [node(root, 'eye_0'), node(root, 'eye_1')].filter((x): x is THREE.Object3D => !!x),
+      hair: new THREE.Group(), hat: node(root, 'hat') ?? new THREE.Group(), hairMap,
+      mats: { skin: mats.skin ?? this.procParts.mats.skin, overall: mats.overall ?? this.procParts.mats.overall, shirt: mats.shirt ?? this.procParts.mats.shirt, hair: mats.hair ?? this.procParts.mats.hair },
+    });
+  }
+
+  private parts(): Parts {
+    return { body: this.body, head: this.head, armL: this.armL, armR: this.armR, legL: this.legL, legR: this.legR, handR: this.handR, eyes: this.eyes, hair: this.hairGroup, hat: this.hatGroup, hairMap: this.glbHair, mats: this.mats };
+  }
+
+  private setParts(p: Parts) {
+    this.shape.clear();
+    this.shape.add(p.body);
+    Object.assign(this, { body: p.body, head: p.head, armL: p.armL, armR: p.armR, legL: p.legL, legR: p.legR, eyes: p.eyes, hairGroup: p.hair, hatGroup: p.hat, glbHair: p.hairMap, mats: p.mats });
+    // 工具移到新的右手
+    for (const t of Object.values(this.tools)) p.handR.add(t);
+    this.handR = p.handR;
+    const look = this.look;
+    this.look = { ...look, hair: look.hair === 'short' ? 'bob' : 'short' }; // 強制重套髮型
+    this.setLook(look);
+  }
+
   setLook(look: Look): void {
     const P = LOOK_PALETTE;
-    if (look.hair !== this.look.hair || !this.hairGroup.children.length) this.buildHair(look.hair);
+    if (look.hair !== this.look.hair || (!this.glbHair && !this.hairGroup.children.length)) this.buildHair(look.hair);
     this.look = { ...look };
     this.mats.skin.color.set(P.skin[look.skin] ?? P.skin[1]);
     this.mats.hair.color.set(P.hair[look.hairColor] ?? P.hair[0]);
@@ -252,6 +306,11 @@ export class Player {
   }
 
   private buildHair(style: HairStyle) {
+    // GLB：6 種髮型已經做好，只切換顯示
+    if (this.glbHair) {
+      for (const [k, o] of Object.entries(this.glbHair)) if (o) o.visible = k === style;
+      return;
+    }
     const g = this.hairGroup;
     g.clear();
     const hair = this.mats.hair;

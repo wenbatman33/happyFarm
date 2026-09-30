@@ -3,6 +3,7 @@ import GUI from 'lil-gui';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { LAYOUT_MOBILE, LAYOUT_PC, LIGHT_TWEAKS, PET_TUNING, SCENE_LAYOUT, clone, type HudKey, type PropPlacement } from '../config/layout';
 import { clock, type Season } from '../core/clock';
+import { Models } from '../world/models';
 import { BOND_THRESHOLDS, xpNext } from '../data/economy';
 import type { Game } from '../game';
 import type { Weather } from '../systems/weather';
@@ -174,7 +175,12 @@ export class DevTools {
     af.add({ f: () => { g.state.data.cows[0].brushes = 0; } }, 'f').name('🪮 重置刷毛次數');
     af.add({ f: () => g.state.addItem('hay', 10) }, 'f').name('🌾 +10 牧草');
     af.add({ f: () => g.player.play('celebrate') }, 'f').name('🙌 主角慶祝');
-    af.add({ f: () => { const h = g.state.data.house; h.buildUntil = null; g.world.setScaffold(false); h.tier = h.tier === 1 ? 2 : 1; g.world.setHouseTier(h.tier); } }, 'f').name('🏠 房屋 T1 ⇄ T2');
+    af.add({ f: () => { const h = g.state.data.house; h.buildUntil = null; g.world.setScaffold(false); h.tier = h.tier >= 3 ? 1 : h.tier + 1; g.world.setHouseTier(h.tier); } }, 'f').name('🏠 房屋階段 T1→T2→T3');
+    af.add({ f: () => { g.state.data.workshop.forEach((s) => (s.doneAt = 0)); } }, 'f').name('🍞 加工立即完成');
+    af.add({ f: () => { g.state.data.trees.forEach((t) => { t.plantedAt -= 30 * 86400000; t.pickedAt = 0; }); } }, 'f').name('🌳 果樹立即成熟並結果');
+    af.add({ f: () => g.state.addItem('giantseed', 1) }, 'f').name('🌰 +1 巨型種子');
+    af.add({ f: () => { g.state.data.prog.stars += 500; } }, 'f').name('⭐ +500 季節星');
+    af.add({ f: () => { const p = g.state.data.prog; p.day = ''; p.week = ''; g.progression.refresh(g.state.now()); } }, 'f').name('📋 重抽每日／每週任務');
     af.add({ f: () => { const h = g.state.data.house; if (h.buildUntil) h.buildUntil = g.state.now(); } }, 'f').name('🔨 施工立即完成');
     af.add({ f: () => { g.state.addItem('wood', 20); g.state.addItem('stone', 20); } }, 'f').name('🪵 +20 木材、+20 石材');
     af.add({ f: () => { g.state.addItem('fert', 5); g.state.addItem('weed', 20); } }, 'f').name('🧪 +5 有機肥、+20 雜草');
@@ -186,6 +192,7 @@ export class DevTools {
 
     // ---- 寵物 ----
     const pf = gui.addFolder('🐶 寵物');
+    pf.add(Models, 'enabled').name('🧸 使用 Blender GLB 模型').onChange(() => g.applyModels());
     pf.add(g.petTuning, 'followDist', 1.2, 6, 0.1).name('跟隨距離（公尺）').onChange(onCh);
     pf.add({ s: g.pet.species }, 's', { 柯基: 'corgi', 橘貓: 'cat', 垂耳兔: 'bunny', 小鴨: 'duck' }).name('切換物種').onChange((sp: 'corgi' | 'cat' | 'bunny' | 'duck') => {
       const d = g.state.data.pet;

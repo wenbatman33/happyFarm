@@ -144,6 +144,7 @@ export class Ranch {
       const t = g.state.now();
       g.state.addItem('hay', -1);
       d.fedAt = t;
+      g.progression.track('cow');
       if (d.milkReadyAt === null) d.milkReadyAt = t + MILK_REGEN_MS;
       d.affection += 5;
       g.world.setTroughHay(true);
@@ -170,6 +171,7 @@ export class Ranch {
       const before = this.hearts();
       d.brushes++;
       d.affection += 10;
+      g.progression.track('cow');
       g.gainXp(5, this.cowPoint(new THREE.Vector3(0, 1.9, 0)), false);
       window.setTimeout(() => {
         sfx.moo(true);
@@ -214,6 +216,9 @@ export class Ranch {
       const q: Quality = r < gold ? 'gold' : r < gold + good ? 'good' : 'normal';
       g.state.addItem(q === 'normal' ? 'milk' : `milk:${q}`);
       d.milked++;
+      g.progression.track('cow');
+      g.progression.track('milk');
+      g.progression.record(q === 'normal' ? 'milk' : `milk:${q}`);
       d.milkReadyAt = null;
       d.affection += 3;
       g.world.setTroughHay(false);

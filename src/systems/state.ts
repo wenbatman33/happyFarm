@@ -5,11 +5,14 @@ import { FIELD_COLS, FIELD_COUNT, STARTER_PLOTS, UNLOCK_ORDER } from './farm';
 import { plotsForLevel } from '../data/economy';
 import { SPECIES, type Species } from '../actors/pet';
 import { DEFAULT_LOOK, type Look } from '../actors/player';
+import { freshProg, type ProgSave } from './progress';
 
 export const SAVE_KEY = 'happyFarm.save';
 export const SCHEMA_VERSION = 1;
 
-export interface PlotSave { owned: boolean; tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number; fert: boolean; boost?: boolean }
+export interface PlotSave { owned: boolean; tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number; fert: boolean; boost?: boolean; giantOf?: number }
+export interface WorkSlot { recipe: string; doneAt: number }
+export interface TreeSave { slot: number; id: string; plantedAt: number; pickedAt: number }
 export interface WeedSave { id: string; tx: number; tz: number; ox: number; oz: number; kind: WeedKind; bornAt: number; pulls: number; zone: string }
 export interface TreasureSpot { id: string; x: number; z: number }
 export interface PetSave {
@@ -53,10 +56,13 @@ export interface SaveData {
   debrisDay: string;
   debrisSeq: number;
   compost: number[]; // 每批完成的時間
-  selectedTool: 'seed' | 'fert';
+  selectedTool: 'seed' | 'fert' | 'giant';
   house: { tier: number; buildUntil: number | null };
   tutorial: number; // 新手引導進度（-1＝已完成）
   orders: { slot: string; list: OrderSave[]; skipAt: number; seq: number; seen: boolean };
+  prog: ProgSave;
+  workshop: WorkSlot[];
+  trees: TreeSave[];
 }
 
 // 新的乳牛：一開始奶是滿的、肚子餓（第一次見面就能擠奶、餵草）
@@ -104,6 +110,9 @@ export function freshSave(now: number): SaveData {
     house: { tier: 1, buildUntil: null },
     tutorial: 0,
     orders: { slot: '', list: [], skipAt: 0, seq: 0, seen: false },
+    prog: freshProg(),
+    workshop: [],
+    trees: [],
   };
 }
 
@@ -138,6 +147,10 @@ function migrate(d: SaveData): SaveData {
   if (d.look === undefined) { d.look = { ...DEFAULT_LOOK }; d.onboard = 'done'; }
   if (!d.mice) { d.mice = []; d.miceSeq = 0; }
   if (d.playerName === undefined) d.playerName = '';
+  // M3（2026-09-30）：任務、手帳、圖鑑、成就、加工坊、果樹
+  if (!d.prog) d.prog = freshProg();
+  if (!d.workshop) d.workshop = [];
+  if (!d.trees) d.trees = [];
   return d;
 }
 

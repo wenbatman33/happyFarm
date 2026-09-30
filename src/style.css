@@ -204,3 +204,57 @@ body.dev-drag .hud-el * { pointer-events: none; }
   .pp-list { grid-template-columns: repeat(2, 1fr); }
   .pp-skill { display: none; }
 }
+
+/* ---------- M3：農場手帳 ---------- */
+.journal-card { width: min(640px, 95vw); max-height: 88vh; display: flex; flex-direction: column; }
+.jn-head { display: flex; justify-content: space-between; align-items: center; }
+.jn-head h3 { margin: 0; }
+.jn-tabs { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+.jn-tabs button { background: #fff; border-radius: 14px; padding: 7px 12px; font-weight: 800; font-size: 14px; box-shadow: inset 0 -3px 0 #ecdcc0; }
+.jn-tabs button.on { background: #fff4c9; box-shadow: inset 0 -3px 0 #f0d27a, 0 0 0 2px var(--gold); }
+.jn-body { overflow-y: auto; padding-right: 4px; }
+.jn-sec { font-weight: 800; margin: 12px 0 6px; }
+.jn-sec small { color: var(--ink-soft); font-weight: 700; margin-left: 6px; }
+.jn-task { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 14px; padding: 8px 12px; margin-bottom: 6px; box-shadow: inset 0 -3px 0 #ecdcc0; }
+.jn-task.claimed { opacity: 0.6; }
+.jn-tl { flex: 1; min-width: 0; }
+.jn-tl b { font-size: 14px; }
+.jn-tl small { color: var(--ink-soft); font-weight: 700; }
+.jn-bar { position: relative; height: 16px; border-radius: 10px; background: #ead9bb; overflow: hidden; margin-top: 4px; }
+.jn-bar.big { height: 20px; margin: 6px 0; }
+.jn-bar i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(#ffd96a, #f2b43a); border-radius: 10px; }
+.jn-bar span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; font-weight: 800; color: #6a4a1a; }
+.jn-ok { font-size: 20px; color: #4d9a2e; font-weight: 800; }
+.jn-season { background: #fff; border-radius: 16px; padding: 10px 12px; margin-bottom: 8px; }
+.jn-season small { color: var(--ink-soft); font-weight: 700; }
+.jn-tiers { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.jn-tier { position: relative; background: #fff; border-radius: 14px; padding: 6px 4px; display: flex; flex-direction: column; align-items: center; gap: 1px; box-shadow: inset 0 -3px 0 #ecdcc0; }
+.jn-tier small { position: absolute; top: 3px; left: 7px; font-size: 10px; font-weight: 800; color: #c8b596; }
+.jn-tier .em { font-size: 22px; }
+.jn-tier .lb { font-size: 11px; font-weight: 700; line-height: 1.2; text-align: center; }
+.jn-tier.locked { opacity: 0.55; }
+.jn-tier.ready { background: #fff4c9; box-shadow: inset 0 -3px 0 #f0d27a, 0 0 0 2px var(--gold); animation: petglow 1.6s ease-in-out infinite; }
+.jn-tier.special { background: #fff0f4; }
+.jn-tier.special.ready { background: #ffe39a; }
+.jn-tier i { position: absolute; top: 2px; right: 6px; color: #4d9a2e; font-style: normal; font-weight: 800; }
+.jn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
+.jn-card { background: #fff; border-radius: 14px; padding: 6px; display: flex; flex-direction: column; align-items: center; text-align: center; box-shadow: inset 0 -3px 0 #ecdcc0; }
+.jn-card .em { font-size: 26px; }
+.jn-card b { font-size: 12px; }
+.jn-card small { font-size: 10px; color: var(--ink-soft); font-weight: 700; line-height: 1.25; }
+.jn-card.unknown { opacity: 0.6; background: #f4ecdc; }
+.ws-body { overflow-y: auto; }
+.ws-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+.ws-slot { background: #fff; border-radius: 14px; padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 2px; box-shadow: inset 0 -3px 0 #ecdcc0; font-size: 13px; }
+.ws-slot .em { font-size: 26px; }
+.ws-slot .jn-bar { width: 100%; }
+.ws-slot.empty { color: var(--ink-soft); justify-content: center; min-height: 86px; background: #f4ecdc; font-weight: 700; }
+.ws-slot.done { background: #eaf8dc; box-shadow: inset 0 -3px 0 #b8dc98, 0 0 0 2px #8ad86a; }
+.ws-actions { display: flex; justify-content: flex-end; margin: 8px 0; }
+.ws-recipe { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 14px; padding: 8px 12px; margin-bottom: 6px; box-shadow: inset 0 -3px 0 #ecdcc0; }
+.ws-recipe.locked { opacity: 0.55; }
+.ws-recipe .em { font-size: 28px; }
+.ws-info { flex: 1; min-width: 0; }
+.ws-info small { color: var(--ink-soft); font-weight: 700; }
+.ws-in { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; font-weight: 700; color: #c0503a; margin-top: 2px; }
+.ws-in .ok { color: #4d9a2e; }

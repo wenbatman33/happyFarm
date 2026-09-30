@@ -40,9 +40,67 @@ function stick(color: string, h: number, r: number, wind = 0.35): THREE.Mesh {
   return s;
 }
 
+// 夜間花：花朵自己發光
+const glowCache = new Map<string, THREE.MeshStandardMaterial>();
+const glow = (color: string) => {
+  let m = glowCache.get(color);
+  if (!m) { m = withWind(mat(color, { roughness: 0.4, emissive: color, emissiveIntensity: 1.1 }), 0.4); glowCache.set(color, m); }
+  return m;
+};
+
+// 巨型作物（3×3）：成熟時約 2.4 公尺寬
+function buildGiant(variant: 'pumpkin' | 'daikon' | 'cabbage' | 'watermelon', stage: number): THREE.Group {
+  const g = new THREE.Group();
+  if (stage <= 1) {
+    for (let i = 0; i < 5; i++) g.add(leaf('#4f9e3a', stage === 0 ? 0.3 : 0.6, (i / 5) * Math.PI * 2, -0.4));
+    return g;
+  }
+  const k = stage === 2 ? 0.55 : 1;
+  const leafC = '#4f8f3a';
+  for (let i = 0; i < 7; i++) g.add(leaf(leafC, 1.0 * k, (i / 7) * Math.PI * 2 + 0.3, -0.25));
+  if (variant === 'pumpkin') {
+    const orange = cm('#f28a2a', 0, 0.55);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const rib = mesh(GEO.sphere, orange);
+      rib.scale.set(0.9 * k, 1.25 * k, 1.5 * k);
+      rib.position.set(Math.cos(a) * 0.42 * k, 0.62 * k, Math.sin(a) * 0.42 * k);
+      rib.rotation.y = -a;
+      g.add(rib);
+    }
+    const stem = mesh(GEO.cyl, cm('#6a8a3a')); stem.scale.set(0.16 * k, 0.4 * k, 0.16 * k); stem.position.y = 1.35 * k; stem.rotation.z = 0.3;
+    g.add(stem);
+  } else if (variant === 'watermelon') {
+    const body = mesh(GEO.sphere, cm('#3f9a3a', 0, 0.4)); body.scale.set(2.0 * k, 1.35 * k, 1.6 * k); body.position.y = 0.6 * k;
+    g.add(body);
+    for (let i = 0; i < 8; i++) {
+      const st = mesh(GEO.sphere, cm('#2a6a2a', 0, 0.4), false);
+      st.scale.set(0.16 * k, 1.37 * k, 1.62 * k); st.position.set((i - 3.5) * 0.24 * k, 0.6 * k, 0);
+      g.add(st);
+    }
+  } else if (variant === 'daikon') {
+    const root = mesh(GEO.cone, cm('#f7f4ec', 0, 0.5)); root.scale.set(0.9 * k, 1.6 * k, 0.9 * k); root.rotation.x = Math.PI; root.position.y = 0.3 * k;
+    const top = mesh(GEO.sphere, cm('#e0f0c8', 0, 0.5)); top.scale.set(0.9 * k, 0.4 * k, 0.9 * k); top.position.y = 1.05 * k;
+    g.add(root, top);
+    for (let i = 0; i < 8; i++) { const l = leaf('#4fae3c', 1.1 * k, (i / 8) * Math.PI * 2, -1.0); l.position.y = 1.1 * k; g.add(l); }
+  } else {
+    const core = mesh(GEO.sphere, cm('#cde8a0', 0, 0.55)); core.scale.set(1.6 * k, 1.4 * k, 1.6 * k); core.position.y = 0.7 * k;
+    g.add(core);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const l = mesh(GEO.sphere, cm('#8fcf5a', 0.1, 0.55)); l.scale.set(0.9 * k, 1.3 * k, 0.35 * k);
+      l.position.set(Math.cos(a) * 0.62 * k, 0.65 * k, Math.sin(a) * 0.62 * k);
+      l.lookAt(Math.cos(a) * 3, 0.65 * k, Math.sin(a) * 3);
+      g.add(l);
+    }
+  }
+  return g;
+}
+
 export function buildCrop(def: CropDef, stage: number): THREE.Group {
   const g = new THREE.Group();
   const s = def.shape;
+  if (s.kind === 'giant') return buildGiant(s.variant, stage);
   if (stage === 0) {
     for (let i = 0; i < 3; i++) {
       const seed = mesh(GEO.sphereLo, cm('#f1dfb0'), false);
@@ -170,7 +228,7 @@ export function buildCrop(def: CropDef, stage: number): THREE.Group {
         g.add(st);
         if (grown) {
           for (let k = 0; k < 4; k++) {
-            const f = mesh(GEO.sphereLo, cm(s.flower, 0.4), false);
+            const f = mesh(GEO.sphereLo, def.night ? glow(s.flower) : cm(s.flower, 0.4), false);
             f.scale.setScalar(0.07);
             f.position.set(Math.cos(a) * 0.1 + Math.cos(k * 1.6) * 0.05, h + 0.02 + (k % 2) * 0.04, Math.sin(a) * 0.1 + Math.sin(k * 1.6) * 0.05);
             g.add(f);

@@ -1,6 +1,7 @@
 import { hashStr, mulberry32 } from '../core/rng';
 import { CROPS, CROP_BY_ID } from '../data/crops';
 import { MILK_SELL, MILK_XP } from '../data/economy';
+import { RECIPES, RECIPE_BY_ID } from '../data/recipes';
 import type { Game } from '../game';
 import { ITEM_INFO, type OrderCard } from '../ui/hud';
 import type { OrderSave } from './state';
@@ -26,7 +27,8 @@ export class Orders {
     const c = CROP_BY_ID[key];
     if (c) return { emoji: c.emoji, name: c.name, sell: c.sell, xp: c.xp };
     const it = ITEM_INFO[key];
-    return { emoji: it?.emoji ?? '📦', name: it?.name ?? key, sell: key === 'milk' ? MILK_SELL : it?.price ?? 1, xp: key === 'milk' ? MILK_XP : 5 };
+    const r = RECIPE_BY_ID[key];
+    return { emoji: it?.emoji ?? '📦', name: it?.name ?? key, sell: key === 'milk' ? MILK_SELL : it?.price ?? 1, xp: key === 'milk' ? MILK_XP : r ? r.xp : 5 };
   }
 
   // 一張隨機訂單：只要已解鎖、當季可種的作物（有擠過牛奶就可能要牛奶）
@@ -36,6 +38,7 @@ export class Orders {
       .filter((c) => d.level >= c.unlock && (c.season === 'all' || c.season === g.season))
       .map((c) => ({ key: c.id, minutes: c.minutes }));
     if (d.cows[0]?.milked > 0) pool.push({ key: 'milk', minutes: 240 });
+    if (d.level >= 15) for (const r of RECIPES) if (d.level >= r.unlock && rand() < 0.35) pool.push({ key: r.id, minutes: 240 });
     const kinds = Math.min(pool.length, rand() < 0.6 ? 1 : rand() < 0.9 ? 2 : 3);
     const picks = [...pool].sort(() => rand() - 0.5).slice(0, kinds);
     const items = picks.map((p) => {

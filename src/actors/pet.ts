@@ -4,6 +4,7 @@ import type { Grid } from '../world/grid';
 import { Mover } from './mover';
 import { clamp, lerp } from '../core/rng';
 import type { Player } from './player';
+import { Models, node } from '../world/models';
 
 // 寵物：開局 4 選 1（docs/02 §2）。M2 先用程式建模，之後換成 Blender GLB
 export type Species = 'corgi' | 'cat' | 'bunny' | 'duck';
@@ -38,14 +39,14 @@ const BLACK = mat('#1d1512', { roughness: 0.2 });
 const WHITE_HL = mat('#ffffff', { emissive: '#ffffff', emissiveIntensity: 0.6 });
 
 interface Rig {
-  body: THREE.Group;
-  head: THREE.Group;
-  legs: THREE.Group[];
-  tail: THREE.Group;
-  ears: THREE.Group[];
+  body: THREE.Object3D;
+  head: THREE.Object3D;
+  legs: THREE.Object3D[];
+  tail: THREE.Object3D;
+  ears: THREE.Object3D[];
   eyes: THREE.Object3D[];
-  wings: THREE.Group[];
-  tongue: THREE.Mesh | null;
+  wings: THREE.Object3D[];
+  tongue: THREE.Object3D | null;
   hat: THREE.Object3D; // 帽子掛點
   neck: THREE.Object3D; // 領巾掛點
   gait: 'trot' | 'prowl' | 'hop' | 'waddle';
@@ -289,6 +290,28 @@ function buildDuck(): Rig {
 }
 
 const BUILDERS: Record<Species, () => Rig> = { corgi: buildCorgi, cat: buildCat, bunny: buildBunny, duck: buildDuck };
+const GAIT: Record<Species, Rig['gait']> = { corgi: 'trot', cat: 'prowl', bunny: 'hop', duck: 'waddle' };
+
+// Blender GLB：節點名稱對齊程式建模的樞紐（見 public/models/README.md）
+function rigFromGLB(src: THREE.Object3D, species: Species): Rig | null {
+  const root = src.clone(true);
+  const body = node(root, 'body'), head = node(root, 'head');
+  if (!body || !head) return null;
+  const list = (names: string[]) => names.map((n) => node(root, n)).filter((x): x is THREE.Object3D => !!x);
+  const anchor = (name: string, parent: THREE.Object3D) => { let a = node(root, name); if (!a) { a = new THREE.Object3D(); parent.add(a); } return a; };
+  return {
+    body, head,
+    legs: list(['leg_0', 'leg_1', 'leg_2', 'leg_3']),
+    tail: node(root, 'tail') ?? new THREE.Object3D(),
+    ears: list(['ear_0', 'ear_1']),
+    eyes: list(['eye_0', 'eye_1']),
+    wings: list(['wing_0', 'wing_1']),
+    tongue: node(root, 'tongue'),
+    hat: anchor('hat_anchor', head),
+    neck: anchor('neck_anchor', body),
+    gait: GAIT[species],
+  };
+}
 
 // 小草帽（親密度 3 解鎖）、紅領巾（親密度 6 解鎖）
 function makeHat(): THREE.Group {
@@ -350,7 +373,8 @@ export class Pet {
   setSpecies(species: Species): void {
     this.species = species;
     if (this.rig) this.scaler.remove(this.rig.body);
-    this.rig = BUILDERS[species]();
+    const glb = Models.enabled ? Models.pets[species] : undefined;
+    this.rig = (glb && rigFromGLB(glb, species)) || BUILDERS[species]();
     this.scaler.add(this.rig.body);
     this.hatObj = this.bandanaObj = null;
     this.applyGrowth(this.stage, true);
@@ -640,7 +664,8 @@ export class Pet {
     R.head.rotation.y = lerp(R.head.rotation.y, headYaw, k);
     R.legs.forEach((l, i) => (l.rotation.x = lerp(l.rotation.x, legRot[i] ?? 0, k * 1.5)));
     R.tail.rotation.y = Math.sin(t * tailSpeed) * tailAmp;
-    R.wings.forEach((w, i) => (w.rotation.z = (i ? -1 : 1) * lerp(w.rotation.z * (i ? -1 : 1), wing, k * 2)));
+    // 翅膀從肩膀往下垂：wing_0（−x 側）往外張是負的 rotation.z
+    R.wings.forEach((w, i) => (w.rotation.z = (i ? 1 : -1) * lerp(w.rotation.z * (i ? 1 : -1), wing, k * 2)));
     R.ears.forEach((e, i) => {
       if (R.gait === 'hop') e.rotation.z = (i ? 1 : -1) * (-2.62 + earFlop * 0.5);
       else e.rotation.x = Math.sin(t * 7 + i) * (this.anim === 'walk' ? 0.12 : 0.03);

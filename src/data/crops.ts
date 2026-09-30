@@ -9,7 +9,8 @@ export type CropShape =
   | { kind: 'flower'; leaf: string; stem: string; flower: string }
   | { kind: 'fruit'; leaf: string; fruit: string; fruitShape: 'long' | 'berry'; count: number }
   | { kind: 'leafy'; leaf: string; leaf2: string; style: 'head' | 'rosette' | 'feather'; flower?: string }
-  | { kind: 'mushroom'; cap: string; stem: string };
+  | { kind: 'mushroom'; cap: string; stem: string }
+  | { kind: 'giant'; variant: 'pumpkin' | 'daikon' | 'cabbage' | 'watermelon' };
 
 export interface CropDef {
   id: string;
@@ -19,6 +20,8 @@ export interface CropDef {
   minutes: number;
   unlock: number;
   shape: CropShape;
+  night?: boolean; // 夜間花：只在 19:00–05:00 生長
+  giant?: boolean; // 巨型作物：佔 3×3
   seed: number;
   sell: number;
   xp: number;
@@ -45,4 +48,24 @@ export const CROPS: CropDef[] = [
   def('sugarcane', '甘蔗', '🎋', 'all', 480, 18, { kind: 'cane', stalk: '#8a5a7a', leaf: '#6ab84a' }),
 ];
 
-export const CROP_BY_ID: Record<string, CropDef> = Object.fromEntries(CROPS.map((c) => [c.id, c]));
+// 夜間花（docs/04 §4.2）
+const nightDef = (id: string, name: string, emoji: string, season: Season, minutes: number, unlock: number, flower: string): CropDef =>
+  ({ ...def(id, name, emoji, season, minutes, unlock, { kind: 'flower', leaf: '#3f7a4a', stem: '#5a8a6a', flower }), night: true });
+CROPS.push(
+  nightDef('primrose', '月見草', '🌙', 'autumn', 360, 31, '#fff27a'),
+  nightDef('frostflower', '霜月花', '❄️', 'winter', 360, 32, '#bfe6ff'),
+  nightDef('moonlily', '月光鈴蘭', '🔔', 'spring', 360, 28, '#a8d8ff'),
+  nightDef('epiphyllum', '曇花', '🤍', 'summer', 480, 30, '#ffffff'),
+);
+
+// 巨型作物（docs/04 §4.3）：巨型種子種在 3×3 的田上，3 天成熟
+const giantDef = (id: string, name: string, emoji: string, season: Season, variant: 'pumpkin' | 'daikon' | 'cabbage' | 'watermelon'): CropDef =>
+  ({ id, name, emoji, season, minutes: 4320, unlock: 1, shape: { kind: 'giant', variant }, giant: true, seed: 0, sell: sellPrice(720) * 12, xp: cropXp(4320) * 3 });
+export const GIANTS: CropDef[] = [
+  giantDef('giant_pumpkin', '萬聖巨南瓜', '🎃', 'autumn', 'pumpkin'),
+  giantDef('giant_daikon', '巨型白蘿蔔', '🥕', 'winter', 'daikon'),
+  giantDef('giant_cabbage', '巨無霸高麗菜', '🥬', 'spring', 'cabbage'),
+  giantDef('giant_watermelon', '巨型西瓜', '🍉', 'summer', 'watermelon'),
+];
+
+export const CROP_BY_ID: Record<string, CropDef> = Object.fromEntries([...CROPS, ...GIANTS].map((c) => [c.id, c]));

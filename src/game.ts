@@ -21,11 +21,21 @@ import { Weeds } from './systems/weeds';
 import { WEATHER_ICON, WEATHER_OVERCAST, WeatherFx, weatherAt, type Weather } from './systems/weather';
 import { Hud, ITEM_INFO, type MenuView, type ToolSlot } from './ui/hud';
 import { Mower } from './systems/mower';
-import { COMPOST_MS, COMPOST_SLOTS, COMPOST_WEEDS, DEBRIS, HAY_PER_TUFTS, HOUSE_T2, MOWER_DEMO, MOWER_LEVEL, RANCH_DEMO, RANCH_LEVEL } from './data/economy';
+import { COMPOST_MS, COMPOST_SLOTS, COMPOST_WEEDS, DEBRIS, HAY_PER_TUFTS, MOWER_DEMO, MOWER_LEVEL, RANCH_DEMO, RANCH_LEVEL } from './data/economy';
 import { Debris } from './systems/debris';
 import { Orders } from './systems/orders';
 import { Tutorial } from './systems/tutorial';
 import { Bubble } from './world/bubble';
+import { Progression } from './systems/progression';
+import { JournalUI } from './ui/journal';
+import { Orchard } from './systems/orchard';
+import { Workshop } from './systems/workshop';
+import { WorkshopPanel } from './ui/workshopPanel';
+import { RECIPE_BY_ID, WORKSHOP_LEVEL } from './data/recipes';
+import { ORCHARD_LEVEL } from './data/trees';
+import { GIANTS } from './data/crops';
+import { HOUSE_TIERS } from './data/economy';
+import { Models, loadModels } from './world/models';
 import { Ranch, type CowAct } from './systems/ranch';
 import { ScreenFx } from './ui/fx';
 
@@ -36,7 +46,9 @@ export type Target =
   | { kind: 'prop'; key: string }
   | { kind: 'move'; x: number; z: number }
   | { kind: 'cow'; act: CowAct }
-  | { kind: 'menu'; key: 'cow' | 'compost' | 'house' }
+  | { kind: 'menu'; key: string }
+  | { kind: 'workshop' }
+  | { kind: 'tree'; slot: number; act: string }
   | { kind: 'orders' }
   | { kind: 'buy'; i: number }
   | { kind: 'debris'; id: string }
@@ -54,6 +66,7 @@ const keyOf = (t: Target): string => {
     case 'compost': return `compost${t.act}`;
     case 'treasure': return `t${t.id}`;
     case 'mouse': return `m${t.id}`;
+    case 'tree': return `tree${t.slot}${t.act}`;
     default: return t.kind;
   }
 };
@@ -89,6 +102,12 @@ export class Game {
   orders: Orders;
   tutorial: Tutorial;
   petSkills: PetSkills;
+  progression: Progression;
+  journal = new JournalUI();
+  orchard: Orchard;
+  workshop: Workshop;
+  workshopPanel = new WorkshopPanel();
+  private pokeT = 0;
   onboarding = false;
   particles: Particles;
   weatherFx: WeatherFx;
@@ -118,7 +137,7 @@ export class Game {
   private driveInput = new THREE.Vector2();
   private downAt = { t: 0, x: 0, y: 0 };
   private toolSlots: ToolSlot[] = [];
-  private bubbles: { mail: Bubble; compost: Bubble; house: Bubble };
+  private bubbles: { mail: Bubble; compost: Bubble; house: Bubble; workshop: Bubble };
   private hammerT = 0;
   private tutorialHint = '';
 
@@ -131,7 +150,7 @@ export class Game {
     this.debris = new Debris(this.world.root, this.state, this.grid, this.farm, this.sceneLayout);
     this.farm.hasDebris = (i) => this.debris.onPlot(i);
     this.weeds.extraBlocked = (x, z) => !!this.debris.at(x, z);
-    this.world.onRebuildGrid = () => this.debris.applyBlocking();
+    this.world.onRebuildGrid = () => { this.debris.applyBlocking(); this.orchard?.applyBlocking(); };
     this.particles = new Particles(this.stage.scene);
     this.weatherFx = new WeatherFx(this.stage.scene);
     this.fx = new ScreenFx(this.stage.camera);
@@ -145,9 +164,12 @@ export class Game {
     this.orders = new Orders(this);
     this.tutorial = new Tutorial(this);
     this.petSkills = new PetSkills(this);
+    this.progression = new Progression(this);
+    this.orchard = new Orchard(this);
+    this.workshop = new Workshop(this);
     const L = this.sceneLayout;
     const bubbleAt = (x: number, z: number, y: number) => { const g = new THREE.Group(); g.position.set(x, 0, z); this.world.root.add(g); return new Bubble(g, y); };
-    this.bubbles = { mail: bubbleAt(L.mailbox.x, L.mailbox.z, 1.85), compost: bubbleAt(L.compost.x, L.compost.z, 1.45), house: bubbleAt(L.house.x, L.house.z + 1, 5.6) };
+    this.bubbles = { mail: bubbleAt(L.mailbox.x, L.mailbox.z, 1.85), compost: bubbleAt(L.compost.x, L.compost.z, 1.45), house: bubbleAt(L.house.x, L.house.z + 1, 5.6), workshop: bubbleAt(L.workshop.x, L.workshop.z, 3.6) };
     const h = this.sceneLayout.house;
     this.player.root.position.set(h.x, 0, h.z + 3.9);
     this.pet.root.position.set(h.x - 1.2, 0, h.z + 4.4);
@@ -163,6 +185,9 @@ export class Game {
     else this.debris.daily(now, occupied);
     this.world.rebuildGrid();
     this.orders.refresh(now);
+    this.world.rebuildGrid();
+    this.progression.refresh(now);
+    this.world.setDecor(d.prog.decor, this.season);
     if (this.state.isNew) this.weeds.seedInitial(now, this.season);
     else {
       const born = this.weeds.tick(now, this.season);
@@ -175,6 +200,7 @@ export class Game {
     this.hud.applyLayout(this.layout);
     this.refreshHud();
     this.stage.renderer.setAnimationLoop(() => this.tick());
+    void loadModels().then(() => this.applyModels());
     if (d.onboard !== 'done') window.setTimeout(() => void this.runOnboarding(), 500);
     else if (d.tutorial === 0) window.setTimeout(() => void this.tutorial.start(), 700);
   }
@@ -203,6 +229,13 @@ export class Game {
     this.hud.onMow = () => this.toggleMower();
     this.hud.onMenuAct = (key, act) => this.onMenuAct(key, act);
     this.hud.onDeliver = (id) => this.deliverOrder(id);
+    this.hud.onJournal = () => this.openJournal();
+    this.journal.onRender = () => this.journal.render(this.state.data, this.season, this.state.now());
+    this.journal.onClaimTask = (id) => { this.progression.claimTask(id); this.journal.onRender?.(); };
+    this.journal.onClaimTier = (i) => { this.progression.claimTier(i); this.journal.onRender?.(); };
+    this.progression.onChange = () => this.journal.onRender?.();
+    this.workshopPanel.onCraft = (id) => this.craft(id);
+    this.workshopPanel.onCollect = () => this.collectCrafts();
     this.hud.onSkip = (id) => this.skipOrder(id);
     this.player.onTugTick = () => {
       sfx.tug();
@@ -227,6 +260,12 @@ export class Game {
     window.addEventListener('resize', () => this.applyLayout());
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.state.save(); });
     window.addEventListener('pagehide', () => this.state.save());
+  }
+
+  // 套用 Blender GLB 模型（沒有檔案時維持程式建模）
+  applyModels(): void {
+    this.player.useModel(Models.enabled ? Models.player : null);
+    this.pet.setSpecies(this.pet.species);
   }
 
   private wirePet() {
@@ -327,6 +366,7 @@ export class Game {
   // ---------- 寵物：技能、禮物、成長 ----------
   petEatWeed(w: WeedSave): void {
     if (!this.weeds.get(w.id)) return;
+    this.progression.track('weed');
     const pos = this.weeds.worldPos(w, 0.25);
     this.weeds.remove(w.id);
     const [item, n] = WEED_ITEM[w.kind];
@@ -386,10 +426,11 @@ export class Game {
     if (k >= '1' && k <= '9') { const s = this.toolSlots[Number(k) - 1]; if (s) this.selectTool(s.id); }
     if (k === ' ') { if (!this.mower.active) this.interactNearest(); e.preventDefault(); }
     if (k === 'b') this.openBag();
+    if (k === 'j') this.openJournal();
     if (k === 'm') this.hud.onMute?.();
     if (k === 'r') this.toggleMower();
     if (k === 'escape' && this.mower.active) this.toggleMower(false);
-    if (k === 'escape') { this.hud.hideMenu(); this.hud.closeOrders(); }
+    if (k === 'escape') { this.hud.hideMenu(); this.hud.closeOrders(); this.journal.close(); this.workshopPanel.close(); }
   }
 
   private onDown(e: PointerEvent) {
@@ -501,10 +542,13 @@ export class Game {
         while (o && !o.userData.kind) o = o.parent;
         const k = o?.userData.kind as string | undefined;
         if (k === 'house' || k === 'compost') return { kind: 'menu', key: k };
+        if (k === 'workshop') return { kind: 'workshop' };
         if (k === 'mailbox') return { kind: 'orders' };
         if (k) return { kind: 'prop', key: k };
       }
     }
+    // 果園樹位
+    if (!dragging) { const sl = this.orchard.slotAt(hit.x, hit.z); if (sl >= 0) return { kind: 'menu', key: `tree:${sl}` }; }
     // 田鼠、挖寶點
     for (const m of this.state.data.mice) { const mp = this.petSkills.mousePos(m); if (Math.hypot(mp.x - hit.x, mp.z - hit.z) < 0.5) return { kind: 'mouse', id: m.id }; }
     if (!dragging) for (const t of this.state.data.treasure.spots) if (Math.hypot(t.x - hit.x, t.z - hit.z) < 0.55) return { kind: 'treasure', id: t.id };
@@ -559,6 +603,7 @@ export class Game {
   enqueue(t: Target): void {
     if (t.kind === 'menu') { this.openMenu(t.key); return; }
     if (t.kind === 'orders') { this.openOrders(); return; }
+    if (t.kind === 'workshop') { this.openWorkshop(); return; }
     if (t.kind === 'buy') { void this.tryBuy(t.i); return; }
     if (t.kind === 'cow' && !RANCH_DEMO && this.state.data.level < RANCH_LEVEL) { this.hud.toast(`🐄 牧場在 Lv${RANCH_LEVEL} 開放`); return; }
     if (t.kind === 'move') {
@@ -601,7 +646,8 @@ export class Game {
       case 'pet': return { x: this.pet.root.position.x, z: this.pet.root.position.z };
       case 'move': return { x: t.x, z: t.z };
       case 'cow': return this.ranch.standSpot(t.act);
-      case 'menu': case 'orders': case 'buy': return null;
+      case 'menu': case 'orders': case 'buy': case 'workshop': return null;
+      case 'tree': { const p = this.orchard.pos(t.slot); return { x: p.x, z: p.z + 1.0 }; }
       case 'debris': { const db = this.debris.get(t.id); return db ? { x: db.x, z: db.z } : null; }
       case 'compost': return { x: this.sceneLayout.compost.x, z: this.sceneLayout.compost.z };
       case 'treasure': { const tr = this.state.data.treasure.spots.find((x) => x.id === t.id); return tr ? { x: tr.x, z: tr.z } : null; }
@@ -621,7 +667,7 @@ export class Game {
     const pos = this.targetPos(t);
     if (!pos) { this.finish(); return; }
     const p = this.player.root.position;
-    const reach = t.kind === 'plot' ? 0.9 : t.kind === 'weed' ? 0.7 : t.kind === 'pet' ? 0.95 : t.kind === 'debris' ? 0.95 : t.kind === 'compost' ? 1.05 : t.kind === 'treasure' ? 0.75 : t.kind === 'mouse' ? 0.8 : 0;
+    const reach = t.kind === 'plot' ? 0.9 : t.kind === 'weed' ? 0.7 : t.kind === 'pet' ? 0.95 : t.kind === 'debris' ? 0.95 : t.kind === 'compost' ? 1.05 : t.kind === 'treasure' ? 0.75 : t.kind === 'mouse' ? 0.8 : t.kind === 'tree' ? 0.3 : 0;
     if (t.kind === 'pet') this.pet.startPetted(p.x, p.z);
     if (t.kind === 'cow') {
       this.ranch.prepare(t.act);
@@ -656,6 +702,7 @@ export class Game {
       case 'mouse':
         this.player.play('harvest', () => this.petSkills.shoo(t.id), () => this.finish());
         return;
+      case 'tree': return this.actTree(t.slot, t.act);
       default: return this.finish();
     }
   }
@@ -664,6 +711,7 @@ export class Game {
   private menuView(key: string, now: number): MenuView {
     if (key === 'cow') return this.ranch.menu(now);
     if (key === 'compost') return this.compostMenu(now);
+    if (key.startsWith('tree:')) return this.orchard.menu(Number(key.slice(5)), now);
     return this.houseMenu(now);
   }
 
@@ -671,10 +719,11 @@ export class Game {
     const L = this.sceneLayout;
     if (key === 'cow') return this.ranch.cow.root.position.clone().setY(2.3);
     if (key === 'compost') return new THREE.Vector3(L.compost.x, 1.3, L.compost.z);
+    if (key.startsWith('tree:')) { const p = this.orchard.pos(Number(key.slice(5))); return new THREE.Vector3(p.x, 2.4, p.z); }
     return new THREE.Vector3(L.house.x, 4.2, L.house.z + 2);
   }
 
-  private openMenu(key: 'cow' | 'compost' | 'house') {
+  private openMenu(key: string) {
     if (key === 'cow' && !RANCH_DEMO && this.state.data.level < RANCH_LEVEL) { this.hud.toast(`🐄 牧場在 Lv${RANCH_LEVEL} 開放`); return; }
     sfx.ui();
     this.hud.showMenu(key, this.menuView(key, this.state.now()));
@@ -692,6 +741,7 @@ export class Game {
     else if (key === 'compost') this.enqueue({ kind: 'compost', act: act as 'add' | 'collect' });
     else if (key === 'house' && act === 'repair') void this.startRepair();
     else if (key === 'house' && act === 'wardrobe') void this.openWardrobe();
+    else if (key.startsWith('tree:')) this.enqueue({ kind: 'tree', slot: Number(key.slice(5)), act });
   }
 
   // ---------- 堆肥桶 ----------
@@ -733,6 +783,7 @@ export class Game {
       this.player.play('harvest', () => {
         d.compost = d.compost.filter((t) => t > now);
         this.state.addItem('fert', ready);
+        this.progression.track('compost', ready);
         sfx.harvest();
         this.particles.burst('sparkle', at, 8, { speed: 1.2, up: 2, size: 0.35 });
         this.fx.float(at.clone().setY(1.4), `+${ready} 🧪 有機肥`, 'item');
@@ -750,18 +801,21 @@ export class Game {
     const building = h.buildUntil !== null;
     const sub = building ? `🔨 施工中，還要 ${fmtMs(h.buildUntil! - now)}` : h.tier === 1 ? '窗戶破了、屋頂也缺了幾片瓦…' : '溫暖的家，煙囪冒著煙 ♪';
     const items: MenuView['items'] = [];
-    if (h.tier === 1 && !building) {
+    const next = HOUSE_TIERS[h.tier + 1];
+    if (next && !building) {
+      const stone = d.inventory.stone ?? 0;
       const lack: string[] = [];
-      if (d.level < HOUSE_T2.level) lack.push(`Lv${HOUSE_T2.level} 解鎖`);
+      if (d.level < next.level) lack.push(`Lv${next.level} 解鎖`);
       else {
-        if (d.coins < HOUSE_T2.coins) lack.push(`🪙${d.coins}/${HOUSE_T2.coins}`);
-        if (wood < HOUSE_T2.wood) lack.push(`🪵${wood}/${HOUSE_T2.wood}`);
+        if (d.coins < next.coins) lack.push(`🪙${d.coins}/${next.coins}`);
+        if (wood < next.wood) lack.push(`🪵${wood}/${next.wood}`);
+        if (stone < next.stone) lack.push(`🪨${stone}/${next.stone}`);
       }
-      items.push({ act: 'repair', emoji: '🔨', label: '修繕房屋', enabled: !lack.length, note: lack.length ? lack.join(' ') : `🪙${HOUSE_T2.coins} 🪵${HOUSE_T2.wood}` });
+      items.push({ act: 'repair', emoji: '🔨', label: h.tier === 1 ? '修繕房屋' : `擴建成${next.name}`, enabled: !lack.length, note: lack.length ? lack.join(' ') : `🪙${next.coins} 🪵${next.wood}${next.stone ? ` 🪨${next.stone}` : ''}` });
     }
     items.push({ act: 'wardrobe', emoji: '👕', label: '換裝', enabled: true, note: '換髮型、衣服顏色' });
     items.push({ act: 'enter', emoji: '🚪', label: '進屋看看', enabled: false, note: '室內在 M3 開放' });
-    return { title: h.tier === 1 ? '🏠 奶奶的小木屋' : '🏠 修繕好的小木屋', sub, items };
+    return { title: h.tier === 1 ? '🏠 奶奶的小木屋' : `🏠 ${HOUSE_TIERS[h.tier]?.name ?? '小木屋'}`, sub, items };
   }
 
   private async openWardrobe() {
@@ -787,17 +841,21 @@ export class Game {
 
   private async startRepair() {
     const d = this.state.data;
-    const ok = await this.hud.confirm('🔨 修繕房屋', `花費 🪙${HOUSE_T2.coins} ＋ 🪵 木材 ×${HOUSE_T2.wood}<br>木匠老木會來施工，大約 1 小時完工。`, '開始施工');
+    const next = HOUSE_TIERS[d.house.tier + 1];
+    if (!next) return;
+    const hours = next.ms / 3600000;
+    const ok = await this.hud.confirm(`🔨 ${d.house.tier === 1 ? '修繕房屋' : `擴建成${next.name}`}`, `花費 🪙${next.coins} ＋ 🪵 木材 ×${next.wood}${next.stone ? ` ＋ 🪨 石材 ×${next.stone}` : ''}<br>木匠老木會來施工，大約 ${hours} 小時完工。`, '開始施工');
     if (!ok) return;
-    if (d.coins < HOUSE_T2.coins || (d.inventory.wood ?? 0) < HOUSE_T2.wood || d.house.buildUntil) { this.hud.toast('材料不夠了'); return; }
-    d.coins -= HOUSE_T2.coins;
-    this.state.addItem('wood', -HOUSE_T2.wood);
-    d.house.buildUntil = this.state.now() + HOUSE_T2.ms;
+    if (d.coins < next.coins || (d.inventory.wood ?? 0) < next.wood || (d.inventory.stone ?? 0) < next.stone || d.house.buildUntil) { this.hud.toast('材料不夠了'); return; }
+    d.coins -= next.coins;
+    this.state.addItem('wood', -next.wood);
+    if (next.stone) this.state.addItem('stone', -next.stone);
+    d.house.buildUntil = this.state.now() + next.ms;
     this.world.setScaffold(true);
     const L = this.sceneLayout.house;
     this.particles.burst('fluff', new THREE.Vector3(L.x, 1.5, L.z + 2.5), 20, { speed: 2.5, up: 2, gravity: -0.3, size: 0.2, life: 1 });
     sfx.coin();
-    this.hud.toast('🔨 木匠老木開始施工了！大約 1 小時後完工', 3200);
+    this.hud.toast(`🔨 木匠老木開始施工了！大約 ${hours} 小時後完工`, 3200);
     this.state.save();
   }
 
@@ -807,15 +865,15 @@ export class Game {
     const L = this.sceneLayout.house;
     if (now >= h.buildUntil) {
       h.buildUntil = null;
-      h.tier = 2;
-      this.state.data.houseTier = 2;
+      h.tier = Math.min(3, h.tier + 1);
+      this.state.data.houseTier = h.tier;
       this.world.setScaffold(false);
-      this.world.setHouseTier(2);
+      this.world.setHouseTier(h.tier);
       const at = new THREE.Vector3(L.x, 2, L.z + 1);
       this.particles.burst('fluff', at, 30, { speed: 3.5, up: 3, gravity: -0.3, size: 0.28, life: 1.2 });
       this.particles.burst('sparkle', at.clone().setY(3), 24, { speed: 3, up: 4, size: 0.5, life: 1.4 });
       sfx.fanfare();
-      this.hud.toast('🏠 房屋修繕完成！煙囪冒煙了，窗戶也亮起來了', 4000);
+      this.hud.toast(h.tier === 2 ? '🏠 房屋修繕完成！煙囪冒煙了，窗戶也亮起來了' : `🏠 ${HOUSE_TIERS[h.tier].name}落成！多了一間房間和門廊搖椅`, 4000);
       this.pet.react();
       if (!this.player.busy && !this.current) this.player.play('celebrate');
       this.state.save();
@@ -832,6 +890,87 @@ export class Game {
     }
   }
 
+  // ---------- 農場手帳 ----------
+  private openJournal() {
+    sfx.paper();
+    this.hud.hideMenu();
+    this.journal.show();
+    this.journal.onRender?.();
+  }
+
+  // ---------- 加工坊 ----------
+  private openWorkshop() {
+    if (!this.workshop.unlocked) { this.hud.toast(`🍞 加工坊在 Lv${WORKSHOP_LEVEL} 開放`); return; }
+    sfx.ui();
+    this.workshopPanel.show();
+    this.workshopPanel.render(this.workshop.view(this.state.now()));
+  }
+
+  private craft(id: string) {
+    if (!this.workshop.start(id, this.state.now())) { this.hud.toast('材料不夠或欄位滿了'); return; }
+    const r = RECIPE_BY_ID[id];
+    sfx.plant();
+    const L = this.sceneLayout.workshop;
+    this.particles.burst('fluff', new THREE.Vector3(L.x, 1.4, L.z + 1.2), 6, { speed: 1, up: 1, gravity: -0.2, size: 0.1, life: 0.6 });
+    this.hud.toast(`🍞 開始做${r.name}`);
+    this.workshopPanel.render(this.workshop.view(this.state.now()));
+  }
+
+  private collectCrafts() {
+    const done = this.workshop.collect(this.state.now());
+    if (!done.length) return;
+    const L = this.sceneLayout.workshop;
+    const at = new THREE.Vector3(L.x, 1.6, L.z + 1.2);
+    for (const r of done) {
+      this.state.addItem(r.id);
+      this.progression.record(r.id);
+      this.fx.fly(at, r.emoji, this.hud.el('bag'));
+    }
+    this.progression.track('craft', done.length);
+    this.gainXp(done.reduce((s, r) => s + r.xp, 0), at, false);
+    sfx.harvest();
+    this.particles.burst('sparkle', at, 8, { speed: 1.2, up: 2, size: 0.35 });
+    this.workshopPanel.render(this.workshop.view(this.state.now()));
+    this.state.save();
+  }
+
+  // ---------- 果園 ----------
+  private actTree(slot: number, act: string) {
+    const now = this.state.now();
+    const p = this.orchard.pos(slot);
+    this.player.mover.face(p.x, p.z);
+    if (act.startsWith('plant:')) {
+      const id = act.slice(6);
+      this.player.play('plant', () => {
+        if (!this.orchard.plant(slot, id, this.state.now())) { this.hud.toast('種不了這棵樹'); return; }
+        sfx.dig();
+        this.particles.burst('dirt', new THREE.Vector3(p.x, 0.2, p.z), 10, { speed: 1.6, up: 2.5, size: 0.1 });
+        this.hud.toast('🌳 種下果樹了！成熟需要一段日子，耐心等等吧', 3000);
+      }, () => this.finish());
+      return;
+    }
+    if (act === 'pick') {
+      if (this.orchard.status(slot, now).st !== 'ready') { this.hud.toast('還沒有果實'); this.finish(); return; }
+      this.player.play('harvest', () => {
+        const def = this.orchard.pick(slot, this.state.now());
+        if (!def) return;
+        const at = new THREE.Vector3(p.x, 1.8, p.z);
+        this.state.addItem(def.id, def.yieldN);
+        this.progression.record(def.id);
+        this.progression.track('fruit');
+        this.progression.track('harvest');
+        sfx.harvest();
+        this.particles.burst('leaf', at, 10, { speed: 1.5, up: 1, size: 0.12 });
+        this.particles.burst('sparkle', at, 6, { speed: 1, up: 1.5, size: 0.35 });
+        this.fx.float(at.clone().setY(2.4), `+${def.yieldN} ${def.emoji}`, 'item');
+        this.fx.fly(at, def.emoji, this.hud.el('bag'));
+        this.gainXp(def.xp, at, true);
+      }, () => this.finish());
+      return;
+    }
+    this.finish();
+  }
+
   // ---------- 訂單板 ----------
   private openOrders() {
     sfx.paper();
@@ -842,6 +981,8 @@ export class Game {
   private deliverOrder(id: string) {
     const o = this.orders.deliver(id);
     if (!o) return;
+    this.progression.track('order');
+    this.progression.track('coins', o.coins);
     const L = this.sceneLayout.mailbox;
     const at = new THREE.Vector3(L.x, 1.4, L.z);
     sfx.coin();
@@ -897,6 +1038,7 @@ export class Game {
       this.particles.burst(spec.item === 'wood' ? 'chip' : 'rock', pos, 16, { speed: 2.6, up: 3.5, size: spec.item === 'wood' ? 0.9 : 0.12 });
       this.particles.burst('dirt', pos.clone().setY(0.1), 8, { speed: 1.6, up: 2, size: 0.09 });
       this.state.addItem(spec.item, spec.n);
+      this.progression.track('debris');
       const info = ITEM_INFO[spec.item];
       this.fx.float(pos.clone().setY(1.2), `+${spec.n} ${info.emoji} ${info.name}`, 'item');
       this.fx.fly(pos, info.emoji, this.hud.el('bag'));
@@ -929,12 +1071,13 @@ export class Game {
   }
 
   // ---------- 田地 ----------
-  private actPlot(i: number) {
+  private actPlot(i: number): void {
     const now = this.state.now();
     const d = this.state.data;
     const pos = this.farm.worldPos(i);
     const status = this.farm.status(i, now);
     const done = () => this.finish();
+    if (status === 'giantpart') return this.actPlot(this.farm.plot(i).giantOf!);
     switch (status) {
       case 'locked':
         this.hud.toast(`🔒 Lv${this.farm.unlockLevel(i)} 可以買這塊田`);
@@ -954,6 +1097,20 @@ export class Game {
         return;
       case 'tilled': {
         if (d.selectedTool === 'fert') { this.hud.toast('🧪 有機肥要施在已經播種的田上'); return done(); }
+        if (d.selectedTool === 'giant') {
+          const g = GIANTS.find((x) => x.season === this.season);
+          if (!g) return done();
+          if (!this.farm.giantBlock(i)) { this.hud.toast('🌰 巨型種子要種在「這塊當左上角」的 3×3 田上，9 塊都要翻好土、空著'); return done(); }
+          this.player.play('plant', () => {
+            if (!this.farm.plantGiant(i, g.id, this.state.now())) return;
+            this.state.addItem('giantseed', -1);
+            if ((d.inventory.giantseed ?? 0) < 1) d.selectedTool = 'seed';
+            sfx.sparkle();
+            this.particles.burst('sparkle', this.farm.worldPos(i + 1 + 6, 0.5), 16, { speed: 2, up: 2.5, size: 0.4 });
+            this.hud.toast(`🌰 種下了${g.name}！3 天後就會長成巨大的樣子`, 3200);
+          }, done);
+          return;
+        }
         const c = CROP_BY_ID[d.selectedSeed];
         if (!c || d.level < c.unlock) { this.hud.toast(`${c?.name ?? '種子'} 需要 Lv${c?.unlock}`); return done(); }
         if (c.season !== 'all' && c.season !== this.season) { this.hud.toast(`${c.name} 只能在${SEASON_LABEL[c.season]}季種植`); return done(); }
@@ -961,6 +1118,7 @@ export class Game {
         this.player.play('plant', () => {
           d.coins -= c.seed;
           this.farm.plant(i, c.id, this.state.now());
+          this.progression.track('plant');
           sfx.plant();
           this.particles.burst('seed', pos.clone().setY(0.3), 5, { speed: 0.8, up: 1.5, size: 0.06 });
           this.fx.float(pos, `-${c.seed} 🪙`, 'bad');
@@ -971,6 +1129,7 @@ export class Game {
         if (this.tryFertilize(i)) return;
         this.player.play('water', () => {
           this.farm.water(i, this.state.now());
+          this.progression.track('water');
           sfx.water();
           const dir = new THREE.Vector3(0, -1, 0);
           this.particles.burst('water', pos.clone().setY(0.9), 14, { speed: 0.8, up: 0.5, size: 0.07, dir, gravity: 12 });
@@ -980,7 +1139,7 @@ export class Game {
         if (this.tryFertilize(i)) return;
         const c = this.farm.def(i)!;
         const left = (1 - this.farm.progress(i, now)) * c.minutes * 60;
-        this.hud.toast(`${c.emoji} ${c.name}還要 ${left > 60 ? `${Math.ceil(left / 60)} 分鐘` : `${Math.ceil(left)} 秒`}`, 1400);
+        this.hud.toast(`${c.emoji} ${c.name}還要 ${left > 3600 ? `${Math.floor(left / 3600)} 小時 ${Math.ceil((left % 3600) / 60)} 分` : left > 60 ? `${Math.ceil(left / 60)} 分鐘` : `${Math.ceil(left)} 秒`}${c.night ? '（只在晚上 7 點到清晨 5 點生長）' : ''}`, 2000);
         return done();
       }
       case 'mature':
@@ -997,6 +1156,14 @@ export class Game {
     const key = quality === 'normal' ? def.id : `${def.id}:${quality}`;
     this.state.addItem(key);
     this.state.data.stats.harvests++;
+    this.progression.track('harvest');
+    if (quality === 'gold') this.progression.track('gold');
+    this.progression.record(key);
+    if (def.giant) {
+      sfx.fanfare();
+      this.particles.burst('sparkle', pos.clone().setY(1.5), 30, { speed: 3, up: 4, size: 0.5, life: 1.4 });
+      this.hud.toast(`🎉 收成了${def.name}！`, 3200);
+    }
     sfx.harvest();
     this.particles.burst('sparkle', pos, quality === 'gold' ? 10 : 4, { speed: 1.2, up: 1.5, size: 0.35, life: 0.8 });
     this.particles.burst('grass', pos.clone().setY(0.2), 5, { speed: 1.2, up: 2, size: 0.8 });
@@ -1029,6 +1196,14 @@ export class Game {
 
   selectTool(id: string): void {
     const d = this.state.data;
+    if (id === 'giant') {
+      if ((d.inventory.giantseed ?? 0) < 1) return;
+      d.selectedTool = 'giant';
+      sfx.ui();
+      this.hud.toast('🌰 點一塊田當 3×3 的左上角（9 塊都要翻好土、空著）', 3200);
+      this.refreshHud();
+      return;
+    }
     if (id === 'fert') {
       if ((d.inventory.fert ?? 0) < 1) { this.hud.toast('還沒有有機肥：把雜草放進堆肥桶就能做'); return; }
       d.selectedTool = 'fert';
@@ -1095,6 +1270,7 @@ export class Game {
     const d = this.state.data;
     const nowMs = performance.now();
     this.combo = nowMs - this.lastPull < COMBO_WINDOW_MS ? this.combo + 1 : 1;
+    this.progression.track('weed');
     this.lastPull = nowMs;
     d.stats.weedsPulled++;
     d.stats.bestCombo = Math.max(d.stats.bestCombo, this.combo);
@@ -1124,6 +1300,7 @@ export class Game {
 
   private luckyFind(item: string, pos: THREE.Vector3) {
     this.state.addItem(item);
+    this.progression.record(item);
     sfx.sparkle();
     this.particles.burst('sparkle', pos, 12, { speed: 1.5, up: 2, size: 0.4 });
     this.hud.toast(`${ITEM_INFO[item].emoji} 幸運！撿到了${ITEM_INFO[item].name}`);
@@ -1142,6 +1319,7 @@ export class Game {
         const pts = PET_TOUCH_POINTS * (d.pet.species === 'duck' && this.weather === 'rain' ? 2 : 1);
         d.pet.touches++;
         d.pet.bond += pts;
+        this.progression.track('pet');
         sfx.woof();
         this.particles.burst('heart', at, 6, { speed: 1, up: 1.5, size: 0.35, life: 1.2 });
         this.fx.float(at, `+${pts} ♥`, 'love');
@@ -1220,6 +1398,7 @@ export class Game {
     const r = Math.random();
     if (r < 0.1) {
       this.state.addItem('coin_old');
+      this.progression.record('coin_old');
       this.hud.toast(byPet ? `🐶 ${this.pet.name}挖到了古錢幣！` : '⛏️ 挖到了古錢幣！');
     } else if (r < 0.3) {
       this.gainXp(40, at, false);
@@ -1246,9 +1425,13 @@ export class Game {
     const plots = plotsForLevel(level) - plotsForLevel(level - 1);
     if (plots > 0) unlocks.push(`🟫 可再買 ${plots} 塊田`);
     if (level === SICKLE_LEVEL) unlocks.push('🔪 小鐮刀');
-    if (level === HOUSE_T2.level) unlocks.push('🏠 房屋修繕');
+    if (level === HOUSE_TIERS[2].level) unlocks.push('🏠 房屋修繕');
     if (level === RANCH_LEVEL) unlocks.push('🐄 牧場');
     if (level === 30) unlocks.push('📬 訂單 6 張');
+    if (level === WORKSHOP_LEVEL) unlocks.push('🍞 加工坊');
+    if (level === ORCHARD_LEVEL) unlocks.push('🌳 果園', '🏡 紅頂農舍');
+    if (level === 40) unlocks.push('🍞 加工欄位 4 格');
+    this.progression.poke();
     this.hud.levelUp(level, unlocks);
     this.particles.burst('sparkle', this.player.root.position.clone().setY(1.2), 20, { speed: 3, up: 4, size: 0.45, life: 1.2 });
     if (!this.player.busy && !this.current) this.player.play('celebrate');
@@ -1276,7 +1459,7 @@ export class Game {
     const inv = this.state.data.inventory;
     let total = 0, n = 0;
     for (const k of Object.keys(inv)) {
-      if (['clover', 'coin_old', 'hay', 'wood', 'stone', 'fert'].includes(k)) continue; // 收藏品、飼料、建材、肥料不賣
+      if (['clover', 'coin_old', 'hay', 'wood', 'stone', 'fert', 'giantseed'].includes(k)) continue; // 收藏品、飼料、建材、肥料不賣
       const info = this.itemInfo(k) ?? ITEM_INFO[k];
       if (!info) continue;
       total += info.price * inv[k];
@@ -1285,6 +1468,8 @@ export class Game {
     }
     if (!n) { this.hud.toast('沒有可以賣的東西'); return; }
     this.state.data.coins += total;
+    this.progression.track('sell', n);
+    this.progression.track('coins', total);
     sfx.coin();
     this.hud.closeBag();
     this.hud.toast(`賣出 ${n} 個，獲得 🪙${total}`);
@@ -1301,12 +1486,15 @@ export class Game {
     this.hud.setTools(this.toolSlots);
     this.hud.setPet(bondLevel(d.pet.bond), this.state.petTouchesLeft(now), SPECIES[this.pet.species].emoji);
     this.hud.setBagCount(Object.entries(d.inventory).reduce((s, [, v]) => s + v, 0));
+    this.hud.setJournalBadge(this.progression.claimable);
+    if (this.journal.open) this.journal.onRender?.();
+    if (this.workshopPanel.open) this.workshopPanel.render(this.workshop.view(now));
     const icons: string[] = [];
     for (const t of [this.current, ...this.queue]) {
       if (!t) continue;
       if (t.kind === 'plot') {
         const st = this.farm.status(t.i, now);
-        icons.push({ locked: '🔒', debris: '🪨', forsale: '🪙', grass: '⛏️', tilled: '🌱', dry: '💧', growing: '⏳', mature: '🧺' }[st]);
+        icons.push({ locked: '🔒', debris: '🪨', forsale: '🪙', grass: '⛏️', tilled: '🌱', dry: '💧', growing: '⏳', mature: '🧺', giantpart: '🌰' }[st]);
       } else if (t.kind === 'weed') {
         const w = this.weeds.get(t.id);
         icons.push(w ? WEED_ICON[w.kind] : '🌿');
@@ -1332,6 +1520,8 @@ export class Game {
     const slots: ToolSlot[] = [];
     const fert = d.inventory.fert ?? 0;
     if (fert > 0 || d.compost.length) slots.push({ id: 'fert', emoji: '🧪', name: '有機肥', sub: `×${fert}`, selected: d.selectedTool === 'fert', lock: fert > 0 ? '' : '製作中' });
+    const gs = d.inventory.giantseed ?? 0;
+    if (gs > 0) slots.push({ id: 'giant', emoji: '🌰', name: '巨型種子', sub: `×${gs}`, selected: d.selectedTool === 'giant', lock: '' });
     const inSeason = CROPS.filter((c) => c.season === 'all' || c.season === this.season);
     const next = inSeason.filter((c) => c.unlock > d.level).sort((a, b) => a.unlock - b.unlock)[0];
     for (const c of inSeason) {
@@ -1368,6 +1558,9 @@ export class Game {
       if (sel && sel.season !== 'all' && sel.season !== this.season) this.state.data.selectedSeed = 'radish';
       this.weather = this.weatherOverride ?? weatherAt(now, this.season);
       this.checkGrowth(now);
+      this.progression.refresh(now);
+      this.pokeT -= 1;
+      if (this.pokeT <= 0) { this.pokeT = 5; this.progression.poke(); }
     }
 
     // 鍵盤移動（相對鏡頭方向）；推除草機時交給 Mower
@@ -1394,6 +1587,9 @@ export class Game {
     this.farm.update(dt, now, this.weather === 'rain' || this.weather === 'snow');
     this.weeds.update(dt);
     this.debris.update(dt);
+    this.orchard.update(dt, now, this.season, this.world.leafColor);
+    this.progression.update(dt);
+    this.world.workshopBusy = this.workshop.busy;
     this.updateConstruction(dt, now);
     this.tutorialHint = this.tutorial.update(dt);
     {
@@ -1401,6 +1597,7 @@ export class Game {
       this.bubbles.mail.set(this.onboarding ? null : !this.orders.d.seen || this.orders.deliverable ? (this.orders.deliverable ? '✅' : '❗') : null);
       this.bubbles.compost.set(d.compost.some((t) => t <= now) ? '🧪' : null);
       this.bubbles.house.set(d.house.buildUntil ? '🔨' : null);
+      this.bubbles.workshop.set(this.workshop.anyReady ? '🍞' : null);
       for (const b of Object.values(this.bubbles)) b.update(this.elapsed);
       this.world.setMailFlag(!this.orders.d.seen || this.orders.deliverable);
     }

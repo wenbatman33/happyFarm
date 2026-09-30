@@ -82,7 +82,21 @@ interface PlotView {
   wet: boolean;
 }
 
-export type PlotStatus = 'locked' | 'debris' | 'forsale' | 'grass' | 'tilled' | 'growing' | 'dry' | 'mature';
+export type PlotStatus = 'locked' | 'debris' | 'forsale' | 'grass' | 'tilled' | 'growing' | 'dry' | 'mature' | 'giantpart';
+
+// 夜間花只在 19:00–05:00 生長：算 [a, b] 與每晚夜間時段的重疊毫秒數
+export function nightMs(a: number, b: number): number {
+  if (b <= a) return 0;
+  const d0 = new Date(a);
+  d0.setHours(0, 0, 0, 0);
+  let day = d0.getTime() - 86400000, total = 0;
+  while (day < b) {
+    const n0 = day + 19 * 3600000, n1 = day + 29 * 3600000;
+    total += Math.max(0, Math.min(b, n1) - Math.max(a, n0));
+    day += 86400000;
+  }
+  return total;
+}
 
 export class Farm {
   root = new THREE.Group();
@@ -184,8 +198,8 @@ export class Farm {
     const p = this.plot(i);
     const d = this.def(i);
     if (!d) return 0;
-    const span = Math.max(0, now - p.snapAt);
-    const wet = Math.max(0, Math.min(now, p.wetUntil) - p.snapAt);
+    const span = d.night ? nightMs(p.snapAt, now) : Math.max(0, now - p.snapAt);
+    const wet = d.night ? nightMs(p.snapAt, Math.min(now, p.wetUntil)) : Math.max(0, Math.min(now, p.wetUntil) - p.snapAt);
     const eff = wet + (span - wet) * DRY_RATE;
     return Math.min(1, p.p0 + eff / (d.minutes * 60000));
   }
@@ -200,6 +214,7 @@ export class Farm {
       if (!this.canOwn(i)) return 'locked';
       return this.hasDebris(i) ? 'debris' : 'forsale';
     }
+    if (p.giantOf !== undefined) return 'giantpart';
     if (!p.tilled) return 'grass';
     if (!p.cropId) return 'tilled';
     if (this.progress(i, now) >= 1) return 'mature';
@@ -227,6 +242,28 @@ export class Farm {
 
   fertilize(i: number): void { this.plot(i).fert = true; }
 
+  // 巨型作物：以 root 為左上角的 3×3，全部是自己的、翻好土、空著
+  giantBlock(root: number): number[] | null {
+    const c = root % FIELD_COLS, r = Math.floor(root / FIELD_COLS);
+    if (c > FIELD_COLS - 3 || r > FIELD_ROWS - 3) return null;
+    const out: number[] = [];
+    for (let dr = 0; dr < 3; dr++) for (let dc = 0; dc < 3; dc++) {
+      const i = root + dc + dr * FIELD_COLS;
+      const p = this.plot(i);
+      if (!p.owned || !p.tilled || p.cropId || p.giantOf !== undefined) return null;
+      out.push(i);
+    }
+    return out;
+  }
+
+  plantGiant(root: number, id: string, now: number): boolean {
+    const block = this.giantBlock(root);
+    if (!block) return false;
+    for (const i of block) if (i !== root) this.plot(i).giantOf = root;
+    this.plant(root, id, now);
+    return true;
+  }
+
   water(i: number, now: number): void {
     const p = this.plot(i);
     const d = this.def(i);
@@ -245,6 +282,7 @@ export class Farm {
     const r = Math.random();
     const quality = rollQuality(p.boost ? Math.max(0, r - 0.1) : r, true, p.fert);
     p.boost = false;
+    if (d.giant) this.state.data.plots.forEach((q) => { if (q.giantOf === i) q.giantOf = undefined; });
     p.cropId = null;
     p.p0 = 0;
     p.snapAt = now;
@@ -297,7 +335,7 @@ export class Farm {
         v.crop = null;
         if (d && stage >= 0) {
           v.crop = buildCrop(d, stage);
-          v.crop.position.y = 0.14;
+          v.crop.position.set(d.giant ? 1 : 0, 0.14, d.giant ? 1 : 0); // 巨型作物長在 3×3 的正中央
           v.crop.rotation.y = (i * 1.7) % (Math.PI * 2);
           v.group.add(v.crop);
           v.pop = 0;
@@ -310,6 +348,7 @@ export class Farm {
         let s = 0.5 + 0.5 * easeOutBack(v.pop);
         if (v.stage === 3) s *= 1 + Math.sin(t * 3 + i) * 0.03; // 成熟：輕輕呼吸，提示可以收
         v.crop.scale.setScalar(s);
+        if (d?.giant && v.stage === 3) v.crop.rotation.z = Math.sin(t * 1.5) * 0.015;
       }
     });
   }
