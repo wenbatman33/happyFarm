@@ -14,6 +14,7 @@ export interface PetContext {
   night: boolean;
   doghouse: { x: number; z: number; rotY: number };
   treasures: { id: string; x: number; z: number }[];
+  followDist: number; // 跟主角保持的距離（DEV 可調）
 }
 
 const rim = (c: string) => withRim(mat(c, { roughness: 0.75 }), 0.16);
@@ -191,17 +192,26 @@ export class Pet {
           this.mover.goTo(tr.x, tr.z, () => { this.stateT = 0; this.mover.face(tr.x, tr.z); }, 0.35);
           this.onBark?.();
         } else if (this.state !== 'dig') {
-          if (dist > 2.8 && (this.repathT <= 0 || !this.mover.moving)) {
+          const fd = ctx.followDist;
+          if (dist > fd + 1.3 && (this.repathT <= 0 || !this.mover.moving)) {
+            // 落後太多才跟上，停在主角斜後方 fd 公尺
             this.state = 'follow';
             this.repathT = 0.5;
-            this.mover.speed = dist > 5 ? 6.2 : 4.4;
+            this.mover.speed = dist > fd + 3 ? 6.2 : 4.2;
             const back = ctx.player.root.rotation.y + Math.PI + 0.7;
-            this.mover.goTo(pp.x + Math.sin(back) * 1.3, pp.z + Math.cos(back) * 1.3, () => (this.state = 'idle'));
+            this.mover.goTo(pp.x + Math.sin(back) * fd, pp.z + Math.cos(back) * fd, () => { this.state = 'idle'; this.stateT = 0; });
+          } else if (dist < fd * 0.5 && !this.mover.moving && this.stateT > 0.8) {
+            // 靠太近：自己退開一點，保持距離
+            this.state = 'wander';
+            this.mover.speed = 2.6;
+            const ax = (p.x - pp.x) / (dist || 1), az = (p.z - pp.z) / (dist || 1);
+            this.mover.goTo(pp.x + (ax || 1) * fd, pp.z + az * fd, () => { this.state = 'idle'; this.stateT = 0; this.mover.face(pp.x, pp.z); });
           } else if (this.state === 'idle' && ctx.player.idleTime > 4 && this.stateT > 3 && Math.random() < dt * 0.4) {
             this.state = 'wander';
             this.mover.speed = 2.2;
             const a = Math.random() * Math.PI * 2;
-            this.mover.goTo(pp.x + Math.cos(a) * 2.5, pp.z + Math.sin(a) * 2.5, () => { this.state = 'idle'; this.stateT = 0; });
+            const r = fd + 0.4 + Math.random() * 1.2;
+            this.mover.goTo(pp.x + Math.cos(a) * r, pp.z + Math.sin(a) * r, () => { this.state = 'idle'; this.stateT = 0; });
           } else if (this.state === 'idle' && Math.random() < dt * 0.3) {
             this.mover.face(pp.x, pp.z);
           }

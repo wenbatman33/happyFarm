@@ -97,4 +97,9 @@ export const LIGHT_TWEAKS = {
 
 export type LightTweaks = typeof LIGHT_TWEAKS;
 
+// 寵物行為微調（DEV 工具「寵物」分頁）
+export const PET_TUNING = {
+  followDist: 3.0, // 跟主角保持的距離（公尺）
+};
+
 export const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));

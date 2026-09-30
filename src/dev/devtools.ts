@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import GUI from 'lil-gui';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { LAYOUT_MOBILE, LAYOUT_PC, LIGHT_TWEAKS, SCENE_LAYOUT, clone, type HudKey, type PropPlacement } from '../config/layout';
+import { LAYOUT_MOBILE, LAYOUT_PC, LIGHT_TWEAKS, PET_TUNING, SCENE_LAYOUT, clone, type HudKey, type PropPlacement } from '../config/layout';
 import { clock, type Season } from '../core/clock';
 import { BOND_THRESHOLDS, xpNext } from '../data/economy';
 import type { Game } from '../game';
@@ -15,6 +15,7 @@ interface Persisted {
   layouts?: { pc: typeof LAYOUT_PC; mobile: typeof LAYOUT_MOBILE };
   scene?: typeof SCENE_LAYOUT;
   light?: typeof LIGHT_TWEAKS;
+  pet?: typeof PET_TUNING;
   clock?: { offset: number; scale: number };
   layoutMode?: 'auto' | 'pc' | 'mobile';
 }
@@ -49,6 +50,7 @@ export class DevTools {
     try { p = JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { /* 忽略 */ }
     if (p.scene) Object.assign(SCENE_LAYOUT, p.scene);
     if (p.light) Object.assign(LIGHT_TWEAKS, p.light);
+    if (p.pet) Object.assign(PET_TUNING, p.pet);
     if (p.layouts) { Object.assign(LAYOUT_PC, p.layouts.pc); Object.assign(LAYOUT_MOBILE, p.layouts.mobile); }
     if (p.clock) clock.restore(p.clock.offset, p.clock.scale);
     return p;
@@ -90,7 +92,7 @@ export class DevTools {
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => {
       const g = this.game;
-      const p: Persisted = { layouts: g.layouts, scene: g.sceneLayout, light: g.light, clock: { offset: clock.offset, scale: clock.scale }, layoutMode: g.layoutMode };
+      const p: Persisted = { layouts: g.layouts, scene: g.sceneLayout, light: g.light, pet: g.petTuning, clock: { offset: clock.offset, scale: clock.scale }, layoutMode: g.layoutMode };
       localStorage.setItem(STORE, JSON.stringify(p));
     }, 300);
   }
@@ -178,6 +180,7 @@ export class DevTools {
 
     // ---- 寵物 ----
     const pf = gui.addFolder('🐶 寵物');
+    pf.add(g.petTuning, 'followDist', 1.2, 6, 0.1).name('跟隨距離（公尺）').onChange(onCh);
     pf.add(this.view, 'bond', 0, BOND_THRESHOLDS[9], 10).name('親密度點數').onChange((v: number) => { g.state.data.pet.bond = v; });
     pf.add(this.view, 'petAnim', ['none', 'idle', 'walk', 'sit', 'happy', 'dig', 'sleep', 'petted']).name('強制動畫').onChange((a: string) => { g.pet.forcedAnim = a === 'none' ? null : (a as typeof g.pet.forcedAnim); });
     pf.close();
@@ -313,7 +316,7 @@ export class DevTools {
 
   private exportJson() {
     const g = this.game;
-    const out = { LAYOUT_PC: g.layouts.pc, LAYOUT_MOBILE: g.layouts.mobile, SCENE_LAYOUT: g.sceneLayout, LIGHT_TWEAKS: g.light };
+    const out = { LAYOUT_PC: g.layouts.pc, LAYOUT_MOBILE: g.layouts.mobile, SCENE_LAYOUT: g.sceneLayout, LIGHT_TWEAKS: g.light, PET_TUNING: g.petTuning };
     const text = JSON.stringify(out, null, 2);
     void navigator.clipboard?.writeText(text).catch(() => undefined);
     const a = document.createElement('a');

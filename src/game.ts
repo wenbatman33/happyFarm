@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LAYOUT_MOBILE, LAYOUT_PC, LIGHT_TWEAKS, SCENE_LAYOUT, clone, type Layout, type LightTweaks, type SceneLayout } from './config/layout';
+import { LAYOUT_MOBILE, LAYOUT_PC, LIGHT_TWEAKS, PET_TUNING, SCENE_LAYOUT, clone, type Layout, type LightTweaks, type SceneLayout } from './config/layout';
 import { clock, dayKey, SEASON_LABEL, type Season } from './core/clock';
 import { sfx } from './core/audio';
 import { hashStr, mulberry32 } from './core/rng';
@@ -47,6 +47,7 @@ export class Game {
   layoutMode: 'auto' | 'pc' | 'mobile' = 'auto';
   sceneLayout: SceneLayout = clone(SCENE_LAYOUT);
   light: LightTweaks = clone(LIGHT_TWEAKS);
+  petTuning = clone(PET_TUNING);
   stage: Stage;
   world: World;
   farm: Farm;
@@ -852,7 +853,7 @@ export class Game {
     if (this.hud.cowMenuOpen) this.placeCowMenu();
     this.player.update(dt);
     const dh = this.sceneLayout.doghouse;
-    this.pet.update(dt, { player: this.player, night, doghouse: { x: dh.x, z: dh.z, rotY: dh.rotY }, treasures: this.state.data.treasure.spots });
+    this.pet.update(dt, { player: this.player, night, doghouse: { x: dh.x, z: dh.z, rotY: dh.rotY }, treasures: this.state.data.treasure.spots, followDist: this.petTuning.followDist });
     if (!this.mower.active) this.runQueue();
     if (this.current?.kind === 'weed' && this.player.animName === 'pull') {
       const u = this.player.animT;
