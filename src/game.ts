@@ -17,6 +17,8 @@ import { Farm } from './systems/farm';
 import { Weeds } from './systems/weeds';
 import { WEATHER_ICON, WEATHER_OVERCAST, WeatherFx, weatherAt, type Weather } from './systems/weather';
 import { Hud, ITEM_INFO } from './ui/hud';
+import { Mower } from './systems/mower';
+import { MOWER_DEMO, MOWER_LEVEL } from './data/economy';
 import { ScreenFx } from './ui/fx';
 
 export type Target =
@@ -48,6 +50,7 @@ export class Game {
   weeds: Weeds;
   player: Player;
   pet: Pet;
+  mower: Mower;
   particles: Particles;
   weatherFx: WeatherFx;
   fx: ScreenFx;
@@ -73,6 +76,8 @@ export class Game {
   private treasureViews = new Map<string, THREE.Object3D>();
   private ray = new THREE.Raycaster();
   private ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private driveInput = new THREE.Vector2();
+  private downAt = { t: 0, x: 0, y: 0 };
 
   constructor(container: HTMLElement) {
     const d = this.state.data;
@@ -86,6 +91,7 @@ export class Game {
     this.player = new Player(this.grid);
     this.pet = new Pet(this.grid);
     this.stage.scene.add(this.player.root, this.pet.root);
+    this.mower = new Mower(this);
     const h = this.sceneLayout.house;
     this.player.root.position.set(h.x, 0, h.z + 3.9);
     this.pet.root.position.set(h.x - 1.2, 0, h.z + 4.4);
@@ -130,7 +136,8 @@ export class Game {
     this.hud.onBag = () => this.openBag();
     this.hud.onSell = () => this.sellAll();
     this.hud.onPet = () => this.enqueue({ kind: 'pet' });
-    this.hud.onMute = () => { sfx.muted = !sfx.muted; this.hud.setMute(sfx.muted); };
+    this.hud.onMute = () => { sfx.setMuted(!sfx.muted); this.hud.setMute(sfx.muted); };
+    this.hud.onMow = () => this.toggleMower();
     this.player.onTugTick = () => {
       sfx.tug();
       if (this.current?.kind === 'weed') {
@@ -170,9 +177,11 @@ export class Game {
     if (k === 'q') this.stage.yawGoal += Math.PI / 2;
     if (k === 'e') this.stage.yawGoal -= Math.PI / 2;
     if (k >= '1' && k <= '9') { const c = CROPS[Number(k) - 1]; if (c) this.selectSeed(c.id); }
-    if (k === ' ') { this.interactNearest(); e.preventDefault(); }
+    if (k === ' ') { if (!this.mower.active) this.interactNearest(); e.preventDefault(); }
     if (k === 'b') this.openBag();
     if (k === 'm') this.hud.onMute?.();
+    if (k === 'r') this.toggleMower();
+    if (k === 'escape' && this.mower.active) this.toggleMower(false);
   }
 
   private onDown(e: PointerEvent) {
@@ -189,6 +198,12 @@ export class Game {
     if (this.pointers.size > 1) return;
     this.dragging = true;
     this.dragSeen.clear();
+    if (this.mower.active) {
+      this.downAt = { t: performance.now(), x: e.clientX, y: e.clientY };
+      this.mower.holdTarget = this.groundAt(e.clientX, e.clientY);
+      this.mower.autoRelease = false;
+      return;
+    }
     const t = this.pick(e.clientX, e.clientY, false);
     if (t) { this.dragSeen.add(keyOf(t)); this.enqueue(t); }
   }
@@ -206,6 +221,7 @@ export class Game {
       return;
     }
     if (!this.dragging) return;
+    if (this.mower.active) { this.mower.holdTarget = this.groundAt(e.clientX, e.clientY); return; }
     // 拖曳：經過的田地、雜草都排進佇列
     const t = this.pick(e.clientX, e.clientY, true);
     if (t && !this.dragSeen.has(keyOf(t))) { this.dragSeen.add(keyOf(t)); this.enqueue(t); }
@@ -218,7 +234,45 @@ export class Game {
       const q = Math.PI / 4;
       this.stage.yawGoal = Math.round(this.stage.yawGoal / q) * q;
     }
-    if (!this.pointers.size) this.dragging = false;
+    if (!this.pointers.size) {
+      if (this.dragging && this.mower.active) {
+        const tap = performance.now() - this.downAt.t < 260 && Math.hypot(e.clientX - this.downAt.x, e.clientY - this.downAt.y) < 12;
+        if (tap) this.mower.autoRelease = true; // 點一下：推到那裡自動停
+        else this.mower.holdTarget = null; // 放開：停下
+      }
+      this.dragging = false;
+    }
+  }
+
+  private groundAt(cx: number, cy: number): { x: number; z: number } | null {
+    this.ray.setFromCamera(new THREE.Vector2((cx / window.innerWidth) * 2 - 1, -(cy / window.innerHeight) * 2 + 1), this.stage.camera);
+    const hit = new THREE.Vector3();
+    return this.ray.ray.intersectPlane(this.ground, hit) ? { x: hit.x, z: hit.z } : null;
+  }
+
+  // ---------- 除草機 ----------
+  toggleMower(on = !this.mower.active): void {
+    if (on === this.mower.active) return;
+    if (on) {
+      if (!MOWER_DEMO && this.state.data.level < MOWER_LEVEL) { this.hud.toast(`🚜 手推除草機在 Lv${MOWER_LEVEL} 解鎖`); return; }
+      if (this.player.busy) return;
+      this.clearQueue();
+      this.player.mover.stop();
+      this.finish();
+      this.hud.toast(this.isMobileLayout ? '🚜 除草機發動！按住畫面往想去的方向推，再點 🚜 收起' : '🚜 除草機發動！WASD 或按住滑鼠推著走，R／Esc 收起', 3200);
+    }
+    this.mower.toggle(on);
+    this.hud.setMower(on);
+  }
+
+  canDrive(x: number, z: number): boolean {
+    const t = tileOf(x, z);
+    return !this.grid.isBlocked(t.x, t.z) && this.farm.indexAt(t.x, t.z) < 0;
+  }
+
+  // 除草機割到雜草：不用拔，直接清掉
+  mowWeed(w: WeedSave): void {
+    this.removeWeed(w);
   }
 
   // 螢幕座標 → 目標
@@ -714,8 +768,9 @@ export class Game {
       this.weather = this.weatherOverride ?? weatherAt(now, this.season);
     }
 
-    // 鍵盤移動（相對鏡頭方向）
-    const m = this.player.manual.set(0, 0);
+    // 鍵盤移動（相對鏡頭方向）；推除草機時交給 Mower
+    this.player.manual.set(0, 0);
+    const m = this.mower.active ? this.driveInput.set(0, 0) : this.player.manual;
     if (!this.inputBlocked) {
       const k = this.keys;
       const f = (k.has('w') || k.has('arrowup') ? 1 : 0) - (k.has('s') || k.has('arrowdown') ? 1 : 0);
@@ -723,21 +778,24 @@ export class Game {
       if (f || r) {
         const y = this.stage.yaw;
         m.set(-Math.sin(y) * f + Math.cos(y) * r, -Math.cos(y) * f - Math.sin(y) * r).normalize();
-        if (this.queue.length) this.clearQueue();
-        if (this.current && !this.player.busy) { this.player.mover.stop(); this.finish(); }
+        if (!this.mower.active) {
+          if (this.queue.length) this.clearQueue();
+          if (this.current && !this.player.busy) { this.player.mover.stop(); this.finish(); }
+        }
       }
     }
 
     const hour = clock.hour(now);
     const night = hour >= 23 || hour < 6;
     this.stage.applyLighting(hour, WEATHER_OVERCAST[this.weather], this.light, dt);
-    this.world.update(dt, this.elapsed, this.stage.glow);
+    this.world.update(dt, this.elapsed, this.stage.glow, now);
     this.farm.update(dt, now, this.weather === 'rain' || this.weather === 'snow');
     this.weeds.update(dt);
+    this.mower.update(dt, this.driveInput);
     this.player.update(dt);
     const dh = this.sceneLayout.doghouse;
     this.pet.update(dt, { player: this.player, night, doghouse: { x: dh.x, z: dh.z, rotY: dh.rotY }, treasures: this.state.data.treasure.spots });
-    this.runQueue();
+    if (!this.mower.active) this.runQueue();
     if (this.current?.kind === 'weed' && this.player.animName === 'pull') {
       const u = this.player.animT;
       this.weeds.setTug(this.current.id, u < 0.25 ? 0 : u < 0.66 ? (u - 0.25) / 0.41 : 0);

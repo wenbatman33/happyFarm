@@ -148,37 +148,57 @@ export class World {
     }
   }
 
+  // 草地資料：除草機割過要能變短、再慢慢長回來
+  private grassData!: { x: Float32Array; z: Float32Array; s: Float32Array; sy: Float32Array; rot: Float32Array; mowedAt: Float64Array; inside: Uint8Array };
+  private mowedList = new Set<number>();
+  private grassT = 0;
+  static GRASS_REGROW_MS = 5 * 60 * 1000;
+
   private buildGrass() {
+    // 單片草葉用開口圓錐（沒有底面），一叢 3 片，面數很少
     const blades: THREE.BufferGeometry[] = [];
-    for (let i = 0; i < 4; i++) {
-      const b = GEO.blade.clone();
-      b.scale(1, 0.7 + i * 0.12, 1);
-      b.rotateZ((i - 1.5) * 0.28);
-      b.rotateY(i * 1.7);
-      b.translate((i - 1.5) * 0.04, 0, (i % 2) * 0.04);
+    for (let i = 0; i < 3; i++) {
+      const b = new THREE.ConeGeometry(0.04, 0.38, 3, 1, true);
+      b.translate(0, 0.19, 0);
+      b.scale(1, 0.75 + i * 0.15, 1);
+      b.rotateZ((i - 1) * 0.3);
+      b.rotateY(i * 2.1);
+      b.translate((i - 1) * 0.05, 0, (i % 2) * 0.05);
       blades.push(b);
     }
     const tuft = mergeGeometries(blades)!;
-    const count = 1100;
-    this.grass = new THREE.InstancedMesh(tuft, withWind(mat('#ffffff', { roughness: 0.9 }), 0.9), count);
+    // 圍籬內種得密，割草才有感；圍籬外稀疏
+    const inside = 3400, outside = 800;
+    const count = inside + outside;
+    this.grass = new THREE.InstancedMesh(tuft, withWind(mat('#ffffff', { roughness: 0.9, side: THREE.DoubleSide }), 0.9), count);
     this.grass.receiveShadow = true;
+    const d = { x: new Float32Array(count), z: new Float32Array(count), s: new Float32Array(count), sy: new Float32Array(count), rot: new Float32Array(count), mowedAt: new Float64Array(count), inside: new Uint8Array(count) };
+    this.grassData = d;
     const rand = mulberry32(42);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3();
     const L = this.layout;
     let n = 0;
     while (n < count) {
-      const x = (rand() - 0.5) * 60, z = (rand() - 0.5) * 60;
+      const isIn = n < inside;
+      const x = isIn ? (rand() - 0.5) * 27 : (rand() - 0.5) * 64;
+      const z = isIn ? (rand() - 0.5) * 27 : (rand() - 0.5) * 64;
+      if (!isIn && Math.abs(x) < 14.5 && Math.abs(z) < 14.5) continue;
+      if (isIn && this.grid.isBlocked(Math.round(x), Math.round(z))) continue;
       if (Math.abs(x - L.house.x) < 3.8 && Math.abs(z - L.house.z) < 3.4) continue;
-      if (x > L.field.x - 1 && x < L.field.x + 4.2 && z > L.field.z - 1 && z < L.field.z + 3.2) continue;
+      if (x > L.field.x - 0.9 && x < L.field.x + 3.9 && z > L.field.z - 0.9 && z < L.field.z + 2.9) continue;
       if (Math.abs(x - L.house.x) < 0.9 && z > L.house.z) continue;
-      const sc = 0.55 + rand() * 0.6;
-      q.setFromAxisAngle(v.set(0, 1, 0), rand() * Math.PI * 2);
-      m.compose(v.set(x, 0, z), q, s.set(sc, sc * (0.8 + rand() * 0.5), sc));
-      this.grass.setMatrixAt(n++, m);
+      d.x[n] = x;
+      d.z[n] = z;
+      d.s[n] = 0.6 + rand() * 0.6;
+      d.sy[n] = 0.85 + rand() * 0.5;
+      d.rot[n] = rand() * Math.PI * 2;
+      d.inside[n] = isIn ? 1 : 0;
+      this.setGrassMatrix(n, 1);
+      n++;
     }
     this.root.add(this.grass);
 
     // 小花：稈＋花頭（兩個 InstancedMesh）
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3();
     const fc = 90;
     const headGeo = new THREE.SphereGeometry(0.08, 8, 6);
     headGeo.translate(0, 0.32, 0);
@@ -200,6 +220,48 @@ export class World {
     this.flowers.castShadow = true;
     this.root.add(this.flowers, stems);
     this.flowers.userData.stems = stems;
+  }
+
+  private gm = new THREE.Matrix4();
+  private gq = new THREE.Quaternion();
+  private gv = new THREE.Vector3();
+  private gs = new THREE.Vector3();
+  private setGrassMatrix(i: number, height: number) {
+    const d = this.grassData;
+    this.gq.setFromAxisAngle(this.gv.set(0, 1, 0), d.rot[i]);
+    this.gm.compose(this.gv.set(d.x[i], 0, d.z[i]), this.gq, this.gs.set(d.s[i], d.s[i] * d.sy[i] * height, d.s[i]));
+    this.grass.setMatrixAt(i, this.gm);
+  }
+
+  // 割草：半徑內的草變成短草根，回傳這次割到幾叢
+  mowGrass(x: number, z: number, r: number, now: number): number {
+    const d = this.grassData;
+    let n = 0;
+    for (let i = 0; i < d.x.length; i++) {
+      if (!d.inside[i]) continue;
+      const dx = d.x[i] - x, dz = d.z[i] - z;
+      if (dx * dx + dz * dz > r * r) continue;
+      // 已經割過、還沒長回一半的就不算
+      if (d.mowedAt[i] && now - d.mowedAt[i] < World.GRASS_REGROW_MS * 0.5) continue;
+      d.mowedAt[i] = now;
+      this.mowedList.add(i);
+      this.setGrassMatrix(i, 0.16);
+      n++;
+    }
+    if (n) this.grass.instanceMatrix.needsUpdate = true;
+    return n;
+  }
+
+  // 割過的草依時間慢慢長回來（用遊戲時間，DEV 快轉也看得到）
+  private regrowGrass(now: number) {
+    if (!this.mowedList.size) return;
+    const d = this.grassData;
+    for (const i of this.mowedList) {
+      const t = Math.min(1, Math.max(0, (now - d.mowedAt[i]) / World.GRASS_REGROW_MS));
+      this.setGrassMatrix(i, 0.16 + 0.84 * t * t);
+      if (t >= 1) { d.mowedAt[i] = 0; this.mowedList.delete(i); }
+    }
+    this.grass.instanceMatrix.needsUpdate = true;
   }
 
   applySeason(season: Season): void {
@@ -576,7 +638,9 @@ export class World {
   }
 
   // ---------- 每幀 ----------
-  update(dt: number, t: number, glow: number): void {
+  update(dt: number, t: number, glow: number, now = 0): void {
+    this.grassT -= dt;
+    if (this.grassT <= 0 && now) { this.grassT = 0.3; this.regrowGrass(now); }
     this.windowMats.forEach((m) => (m.emissiveIntensity = glow * 3.2));
     this.lanternMat.emissiveIntensity = glow * 5;
     this.lantern.intensity = glow * 6;

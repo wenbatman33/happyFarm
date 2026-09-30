@@ -46,6 +46,10 @@ export const WEED_SPAWN_MS = 90 * 60 * 1000;
 export const WEED_XP = { sprout: 3, bush: 5, big: 8, dandelion: 4, leaves: 4, snow: 4 } as const;
 export const COMBO_WINDOW_MS = 1600;
 
+// 手推除草機：正式版 Lv45 解鎖；M0 試玩先開放
+export const MOWER_LEVEL = 45;
+export const MOWER_DEMO = true;
+
 // 休息加成：離線每小時累積 DailyXP × 5%，上限 150%
 export const RESTED_PER_HOUR = 0.05;
 export const RESTED_CAP = 1.5;

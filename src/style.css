@@ -70,6 +70,8 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: 0; }
 .round-btn .badge, .round-btn .bond { position: absolute; top: -4px; right: -4px; min-width: 1.6em; height: 1.6em; padding: 0 5px; border-radius: 1em; background: #e8504a; color: #fff; font-size: 0.7em; font-weight: 800; display: grid; place-items: center; font-style: normal; }
 .round-btn .bond { background: #ff7aa8; }
 .pet-btn.glow { animation: petglow 1.8s ease-in-out infinite; }
+.mow-btn.on { background: #ffe39a; box-shadow: var(--shadow), 0 0 0 4px #ff9f2a; animation: buzz 0.09s linear infinite; }
+@keyframes buzz { 50% { transform: translate(0.5px, -0.5px) rotate(0.6deg); } }
 @keyframes petglow { 50% { box-shadow: var(--shadow), 0 0 0 5px rgba(255, 122, 168, 0.45); } }
 
 .queue { display: flex; gap: 3px; background: rgba(74, 53, 38, 0.55); padding: 4px 10px; border-radius: 20px; }

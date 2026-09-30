@@ -43,6 +43,8 @@ export class Player {
   private idleT = 0;
   private anim: { name: ActionAnim; t: number; fired: boolean; onImpact?: () => void; onDone?: () => void } | null = null;
   onTugTick?: () => void;
+  pushing = false; // 推除草機中（移動由 Mower 控制）
+  pushSpeed = 0;
 
   constructor(private grid: Grid) {
     this.mover = new Mover(this.root, grid);
@@ -191,7 +193,7 @@ export class Player {
 
   update(dt: number): void {
     // 手動移動（WASD）
-    if (this.manual.lengthSq() > 0.01 && !this.anim) {
+    if (this.manual.lengthSq() > 0.01 && !this.anim && !this.pushing) {
       this.mover.stop();
       const sp = this.mover.speed * dt;
       const p = this.root.position;
@@ -201,7 +203,7 @@ export class Player {
       this.mover.yawGoal = Math.atan2(this.manual.x, this.manual.y);
     }
     this.mover.update(dt);
-    const walking = this.mover.moving || this.manual.lengthSq() > 0.01;
+    const walking = this.pushing ? this.pushSpeed > 0.15 || this.mover.moving : this.mover.moving || this.manual.lengthSq() > 0.01;
     this.idleT = walking || this.anim ? 0 : this.idleT + dt;
 
     // 目標姿勢
@@ -219,6 +221,18 @@ export class Player {
         this.anim = null;
         for (const t of Object.values(this.tools)) t.visible = false;
         done?.();
+      }
+    } else if (this.pushing) {
+      // 推除草機：雙手前伸握把手、身體前傾，手臂跟著引擎震動
+      const buzz = Math.sin(tNow * 70) * 0.03;
+      g.aLx = g.aRx = -1.2 + buzz;
+      g.aLz = 0.18; g.aRz = -0.18;
+      g.lean = 0.3;
+      if (walking) {
+        this.walkPhase += dt * (7 + this.pushSpeed * 2.5);
+        const s = Math.sin(this.walkPhase);
+        g.lL = s * 0.6; g.lR = -s * 0.6;
+        g.y = Math.abs(Math.cos(this.walkPhase)) * 0.04;
       }
     } else if (walking) {
       this.walkPhase += dt * 13;

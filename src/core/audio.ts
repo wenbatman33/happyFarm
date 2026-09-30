@@ -18,6 +18,11 @@ class Sfx {
     this.master.connect(this.ctx.destination);
   }
 
+  setMuted(m: boolean): void {
+    this.muted = m;
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.45, this.ctx.currentTime, 0.02);
+  }
+
   private ready(): { ctx: AudioContext; out: GainNode } | null {
     if (!this.ctx || !this.master || this.muted) return null;
     return { ctx: this.ctx, out: this.master };
@@ -76,6 +81,88 @@ class Sfx {
   ui(): void { this.tone(880, 0.04, 'sine', 0.15); }
   levelUp(): void { [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, 0.28, 'triangle', 0.3, undefined, i * 0.09)); }
   swish(): void { this.noise(0.18, 'bandpass', 2200, 0.25); }
+
+  // ---------- 除草機引擎（持續音） ----------
+  private eng: {
+    out: GainNode; lp: BiquadFilterNode; o1: OscillatorNode; o2: OscillatorNode; lfo: OscillatorNode; ng: GainNode; srcs: AudioScheduledSourceNode[];
+  } | null = null;
+
+  engineStart(): void {
+    if (!this.ctx || !this.master || this.eng) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(0.2, t + 0.7);
+    out.connect(this.master);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 650;
+    lp.connect(out);
+    // 被 LFO 調變的增益：做出「噗噗噗」的單缸引擎聲
+    const am = ctx.createGain();
+    am.gain.value = 0.6;
+    am.connect(lp);
+    const o1 = ctx.createOscillator();
+    o1.type = 'sawtooth';
+    o1.frequency.setValueAtTime(18, t);
+    o1.frequency.exponentialRampToValueAtTime(50, t + 0.7); // 拉繩發動：轉速爬升
+    o1.connect(am);
+    const o2 = ctx.createOscillator();
+    o2.type = 'square';
+    o2.frequency.setValueAtTime(37, t);
+    o2.frequency.exponentialRampToValueAtTime(101, t + 0.7);
+    const o2g = ctx.createGain();
+    o2g.gain.value = 0.25;
+    o2.connect(o2g).connect(am);
+    const lfo = ctx.createOscillator();
+    lfo.type = 'square';
+    lfo.frequency.value = 15;
+    const lfoG = ctx.createGain();
+    lfoG.gain.value = 0.3;
+    lfo.connect(lfoG).connect(am.gain);
+    // 刀片割草的沙沙聲（割到草時才開大）
+    const len = ctx.sampleRate;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const dd = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) dd[i] = Math.random() * 2 - 1;
+    const ns = ctx.createBufferSource();
+    ns.buffer = buf;
+    ns.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2600;
+    bp.Q.value = 0.7;
+    const ng = ctx.createGain();
+    ng.gain.value = 0;
+    ns.connect(bp).connect(ng).connect(out);
+    const srcs = [o1, o2, lfo, ns];
+    srcs.forEach((n) => n.start(t));
+    this.noise(0.5, 'lowpass', 900, 0.35); // 拉繩的「唰」
+    this.eng = { out, lp, o1, o2, lfo, ng, srcs };
+  }
+
+  // speed01：推動速度；load01：割草負載
+  engineUpdate(speed01: number, load01: number): void {
+    if (!this.eng || !this.ctx) return;
+    const t = this.ctx.currentTime, e = this.eng;
+    const f = 50 + speed01 * 16 + load01 * 10;
+    e.o1.frequency.setTargetAtTime(f, t, 0.12);
+    e.o2.frequency.setTargetAtTime(f * 2.02, t, 0.12);
+    e.lfo.frequency.setTargetAtTime(15 + speed01 * 8, t, 0.12);
+    e.ng.gain.setTargetAtTime(Math.min(0.5, load01 * 0.6), t, 0.05);
+    e.lp.frequency.setTargetAtTime(650 + load01 * 700 + speed01 * 200, t, 0.1);
+  }
+
+  engineStop(): void {
+    if (!this.eng || !this.ctx) return;
+    const t = this.ctx.currentTime, e = this.eng;
+    e.o1.frequency.setTargetAtTime(20, t, 0.25);
+    e.out.gain.setTargetAtTime(0.0001, t, 0.18);
+    e.srcs.forEach((n) => n.stop(t + 0.9));
+    this.eng = null;
+  }
+
+  bump(): void { this.tone(90, 0.12, 'square', 0.18, 55); }
 }
 
 export const sfx = new Sfx();

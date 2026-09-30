@@ -25,6 +25,7 @@ export class Hud {
   onPet?: () => void;
   onMute?: () => void;
   onSell?: () => void;
+  onMow?: () => void;
 
   constructor() {
     this.root = document.createElement('div');
@@ -44,6 +45,7 @@ export class Hud {
       </div>
       <div class="hud-el" data-hud="toolbar"><div class="seeds"></div></div>
       <div class="hud-el" data-hud="bag">
+        <button class="round-btn mow-btn" title="除草機 (R)"><span>🚜</span></button>
         <button class="round-btn pet-btn" title="麻糬"><span>🐶</span><i class="bond"></i></button>
         <button class="round-btn bag-btn" title="背包 (B)"><span>🎒</span><i class="badge hidden">0</i></button>
       </div>
@@ -55,6 +57,7 @@ export class Hud {
     $('.bag-btn', this.root).onclick = () => this.onBag?.();
     $('.pet-btn', this.root).onclick = () => this.onPet?.();
     $('.mute', this.root).onclick = () => this.onMute?.();
+    $('.mow-btn', this.root).onclick = () => this.onMow?.();
 
     const panel = document.createElement('div');
     panel.id = 'bag-panel';
@@ -117,6 +120,8 @@ export class Hud {
     $('.wx', this.root).textContent = wx;
     $('.coin-n', this.root).textContent = Math.floor(coins).toLocaleString();
   }
+
+  setMower(on: boolean): void { $('.mow-btn', this.root).classList.toggle('on', on); }
 
   setMute(m: boolean): void { $('.mute', this.root).textContent = m ? '🔇' : '🔊'; }
 
