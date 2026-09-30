@@ -167,6 +167,10 @@ export class DevTools {
     af.add({ f: () => { g.state.data.coins += 1000; } }, 'f').name('🪙 +1000 金幣');
     af.add({ f: () => g.spawnTreasure() }, 'f').name('💎 放一個挖寶點');
     af.add({ f: () => g.pet.react() }, 'f').name('🐶 寵物慶祝');
+    af.add({ f: () => { const c = g.state.data.cows[0]; c.milkReadyAt = 0; c.fedAt = g.state.now(); } }, 'f').name('🥛 牛奶立即可擠');
+    af.add({ f: () => { g.state.data.cows[0].fedAt = 0; } }, 'f').name('🌾 牛變餓');
+    af.add({ f: () => { g.state.data.cows[0].brushes = 0; } }, 'f').name('🪮 重置刷毛次數');
+    af.add({ f: () => g.state.addItem('hay', 10) }, 'f').name('🌾 +10 牧草');
     af.add({ f: () => g.player.play('celebrate') }, 'f').name('🙌 主角慶祝');
     af.add({ f: () => { const t = g.world.houseTier === 1 ? 2 : 1; g.world.setHouseTier(t); g.state.data.houseTier = t; } }, 'f').name('🏠 房屋 T1 ⇄ T2');
     af.add({ f: () => { if (confirm('確定要重設存檔？')) { g.state.reset(); localStorage.removeItem('happyFarm.save'); location.reload(); } } }, 'f').name('🗑 重設存檔');

@@ -8,6 +8,7 @@ export const SCHEMA_VERSION = 1;
 export interface PlotSave { tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number }
 export interface WeedSave { id: string; tx: number; tz: number; ox: number; oz: number; kind: WeedKind; bornAt: number; pulls: number; zone: string }
 export interface TreasureSpot { id: string; x: number; z: number }
+export interface CowSave { name: string; affection: number; fedAt: number; milkReadyAt: number | null; brushDay: string; brushes: number; milked: number }
 
 export interface SaveData {
   v: number;
@@ -28,6 +29,13 @@ export interface SaveData {
   selectedSeed: string;
   houseTier: number;
   treasure: { day: string; spots: TreasureSpot[] };
+  cows: CowSave[];
+  hayProgress: number;
+}
+
+// 新的乳牛：一開始奶是滿的、肚子餓（第一次見面就能擠奶、餵草）
+export function freshCow(): CowSave {
+  return { name: '花花', affection: 0, fedAt: 0, milkReadyAt: 0, brushDay: '', brushes: 0, milked: 0 };
 }
 
 export function freshSave(now: number): SaveData {
@@ -40,7 +48,7 @@ export function freshSave(now: number): SaveData {
     xp: 0,
     coins: 120,
     rested: 0,
-    inventory: {},
+    inventory: { hay: 5 },
     plots: Array.from({ length: 12 }, () => ({ tilled: false, cropId: null, p0: 0, snapAt: now, wetUntil: 0 })),
     weeds: [],
     zones: {},
@@ -50,12 +58,17 @@ export function freshSave(now: number): SaveData {
     selectedSeed: 'radish',
     houseTier: 1,
     treasure: { day: '', spots: [] },
+    cows: [freshCow()],
+    hayProgress: 0,
   };
 }
 
 // 存檔版本遷移：之後每次改格式都在這裡加一段，舊存檔不能壞
 function migrate(d: SaveData): SaveData {
   if (!d.v) d.v = 1;
+  // 牧場（2026-09-30 加入）：舊存檔補上乳牛與起始牧草
+  if (!d.cows) { d.cows = [freshCow()]; d.inventory.hay = (d.inventory.hay ?? 0) + 5; }
+  if (d.hayProgress === undefined) d.hayProgress = 0;
   return d;
 }
 

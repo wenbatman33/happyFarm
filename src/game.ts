@@ -18,7 +18,8 @@ import { Weeds } from './systems/weeds';
 import { WEATHER_ICON, WEATHER_OVERCAST, WeatherFx, weatherAt, type Weather } from './systems/weather';
 import { Hud, ITEM_INFO } from './ui/hud';
 import { Mower } from './systems/mower';
-import { MOWER_DEMO, MOWER_LEVEL } from './data/economy';
+import { HAY_PER_TUFTS, MOWER_DEMO, MOWER_LEVEL, RANCH_DEMO, RANCH_LEVEL } from './data/economy';
+import { Ranch, type CowAct } from './systems/ranch';
 import { ScreenFx } from './ui/fx';
 
 export type Target =
@@ -26,9 +27,11 @@ export type Target =
   | { kind: 'weed'; id: string }
   | { kind: 'pet' }
   | { kind: 'prop'; key: string }
-  | { kind: 'move'; x: number; z: number };
+  | { kind: 'move'; x: number; z: number }
+  | { kind: 'cow'; act: CowAct }
+  | { kind: 'cowMenu' };
 
-const keyOf = (t: Target): string => (t.kind === 'plot' ? `p${t.i}` : t.kind === 'weed' ? `w${t.id}` : t.kind === 'prop' ? `prop${t.key}` : t.kind);
+const keyOf = (t: Target): string => (t.kind === 'plot' ? `p${t.i}` : t.kind === 'weed' ? `w${t.id}` : t.kind === 'prop' ? `prop${t.key}` : t.kind === 'cow' ? `cow${t.act}` : t.kind);
 
 const WEED_ITEM: Record<WeedSave['kind'], [string, number]> = {
   sprout: ['weed', 1], bush: ['weed', 2], big: ['weed', 4], dandelion: ['dandelion', 1], leaves: ['leaf', 2], snow: ['snowball', 1],
@@ -51,6 +54,7 @@ export class Game {
   player: Player;
   pet: Pet;
   mower: Mower;
+  ranch: Ranch;
   particles: Particles;
   weatherFx: WeatherFx;
   fx: ScreenFx;
@@ -92,6 +96,7 @@ export class Game {
     this.pet = new Pet(this.grid);
     this.stage.scene.add(this.player.root, this.pet.root);
     this.mower = new Mower(this);
+    this.ranch = new Ranch(this);
     const h = this.sceneLayout.house;
     this.player.root.position.set(h.x, 0, h.z + 3.9);
     this.pet.root.position.set(h.x - 1.2, 0, h.z + 4.4);
@@ -138,6 +143,7 @@ export class Game {
     this.hud.onPet = () => this.enqueue({ kind: 'pet' });
     this.hud.onMute = () => { sfx.setMuted(!sfx.muted); this.hud.setMute(sfx.muted); };
     this.hud.onMow = () => this.toggleMower();
+    this.hud.onCowAct = (act) => this.enqueue({ kind: 'cow', act });
     this.player.onTugTick = () => {
       sfx.tug();
       if (this.current?.kind === 'weed') {
@@ -182,11 +188,13 @@ export class Game {
     if (k === 'm') this.hud.onMute?.();
     if (k === 'r') this.toggleMower();
     if (k === 'escape' && this.mower.active) this.toggleMower(false);
+    if (k === 'escape') this.hud.hideCowMenu();
   }
 
   private onDown(e: PointerEvent) {
     sfx.unlock();
     if (this.inputBlocked) return;
+    if (this.hud.cowMenuOpen) this.hud.hideCowMenu();
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     if (this.pointers.size === 2) {
@@ -285,6 +293,7 @@ export class Game {
     if (!dragging) {
       const pp = this.pet.root.position;
       if (this.ray.intersectObject(this.pet.root, true).length || Math.hypot(hit.x - pp.x, hit.z - pp.z) < 0.55) return { kind: 'pet' };
+      if (this.ray.intersectObject(this.ranch.cow.root, true).length) return { kind: 'cowMenu' };
       const props = this.ray.intersectObjects(this.world.interactive, true);
       if (props.length && props[0].distance < groundDist) {
         let o: THREE.Object3D | null = props[0].object;
@@ -328,6 +337,8 @@ export class Game {
 
   // ---------- 動作佇列 ----------
   enqueue(t: Target): void {
+    if (t.kind === 'cowMenu') { this.openCowMenu(); return; }
+    if (t.kind === 'cow' && !RANCH_DEMO && this.state.data.level < RANCH_LEVEL) { this.hud.toast(`🐄 牧場在 Lv${RANCH_LEVEL} 開放`); return; }
     if (t.kind === 'move') {
       this.clearQueue();
       if (this.current && !this.player.busy) { this.player.mover.stop(); this.finish(); }
@@ -365,6 +376,8 @@ export class Game {
       case 'weed': { const w = this.weeds.get(t.id); return w ? { x: w.tx + w.ox, z: w.tz + w.oz } : null; }
       case 'pet': return { x: this.pet.root.position.x, z: this.pet.root.position.z };
       case 'move': return { x: t.x, z: t.z };
+      case 'cow': return this.ranch.standSpot(t.act);
+      case 'cowMenu': return null;
       case 'prop': {
         const L = this.sceneLayout;
         const p = t.key === 'house' ? { x: L.house.x, z: L.house.z + 3.6 } : t.key === 'doghouse' ? L.doghouse : t.key === 'mailbox' ? L.mailbox : L.compost;
@@ -382,6 +395,10 @@ export class Game {
     const p = this.player.root.position;
     const reach = t.kind === 'plot' ? 0.9 : t.kind === 'weed' ? 0.7 : t.kind === 'pet' ? 0.95 : 0;
     if (t.kind === 'pet') this.pet.startPetted(p.x, p.z);
+    if (t.kind === 'cow') {
+      this.ranch.prepare(t.act);
+      if (Math.hypot(pos.x - p.x, pos.z - p.z) < 0.25) { this.arrive(t); return; }
+    }
     if (reach && Math.hypot(pos.x - p.x, pos.z - p.z) <= reach + 0.2) { this.arrive(t); return; }
     const ok = this.player.mover.goTo(pos.x, pos.z, () => this.arrive(t), reach * 0.85);
     if (!ok) this.finish();
@@ -397,6 +414,40 @@ export class Game {
       case 'pet': return this.actPet();
       case 'prop': return this.actProp(t.key);
       case 'move': return this.finish();
+      case 'cow': return this.ranch.whenReady(() => this.actCow(t.act));
+      case 'cowMenu': return this.finish();
+    }
+  }
+
+  // ---------- 牧場 ----------
+  private openCowMenu() {
+    sfx.ui();
+    this.hud.showCowMenu(this.ranch.menu(this.state.now()));
+    this.placeCowMenu();
+  }
+
+  private placeCowMenu() {
+    const s = this.fx.project(this.ranch.cow.root.position.clone().setY(2.3));
+    this.hud.moveCowMenu(s.x, s.y);
+  }
+
+  private actCow(act: CowAct) {
+    const done = () => { this.ranch.release(); this.finish(); };
+    if (act === 'feed') this.ranch.doFeed(done);
+    else if (act === 'brush') this.ranch.doBrush(done);
+    else this.ranch.doMilk(done);
+  }
+
+  // 除草機割下的草累積成牧草
+  addHayProgress(tufts: number): void {
+    const d = this.state.data;
+    d.hayProgress += tufts;
+    while (d.hayProgress >= HAY_PER_TUFTS) {
+      d.hayProgress -= HAY_PER_TUFTS;
+      this.state.addItem('hay');
+      const at = this.player.root.position.clone().setY(1.6);
+      this.fx.float(at, '+1 🌾 牧草', 'item');
+      this.fx.fly(at, '🌾', this.hud.el('bag'));
     }
   }
 
@@ -685,8 +736,11 @@ export class Game {
   private itemInfo(key: string): { name: string; emoji: string; price: number } | null {
     const [id, q] = key.split(':');
     const c = CROP_BY_ID[id];
-    if (!c) return null;
     const quality = (q ?? 'normal') as Quality;
+    if (!c) {
+      const it = ITEM_INFO[id];
+      return it && q ? { name: `${QUALITY_LABEL[quality]} ${it.name}`, emoji: it.emoji, price: Math.round(it.price * QUALITY_MULT[quality]) } : null;
+    }
     return { name: `${QUALITY_LABEL[quality] ? QUALITY_LABEL[quality] + ' ' : ''}${c.name}`, emoji: c.emoji, price: Math.round(c.sell * QUALITY_MULT[quality]) };
   }
 
@@ -699,7 +753,7 @@ export class Game {
     const inv = this.state.data.inventory;
     let total = 0, n = 0;
     for (const k of Object.keys(inv)) {
-      if (k === 'clover' || k === 'coin_old') continue; // 收藏品不賣
+      if (k === 'clover' || k === 'coin_old' || k === 'hay') continue; // 收藏品、牛的飼料不賣
       const info = this.itemInfo(k) ?? ITEM_INFO[k];
       if (!info) continue;
       total += info.price * inv[k];
@@ -733,6 +787,7 @@ export class Game {
         const w = this.weeds.get(t.id);
         icons.push(w ? WEED_ICON[w.kind] : '🌿');
       } else if (t.kind === 'pet') icons.push('🐶');
+      else if (t.kind === 'cow') icons.push({ feed: '🌾', brush: '🪮', milk: '🥛' }[t.act]);
     }
     this.hud.setQueue(icons);
     // 簡易新手引導
@@ -741,6 +796,7 @@ export class Game {
     if (d.stats.weedsPulled < 5) hint = '👆 點房子周圍的雜草，把奶奶的農場整理乾淨！按住拖曳可以連續拔';
     else if (d.stats.harvests < 1) hint = tilled ? '🌱 翻好的土點一下播種，再點一下澆水，蘿蔔 1 分鐘就熟' : '🟫 點右邊的田地翻土';
     else if (d.pet.bond < 10) hint = `🐶 點一下${this.pet.name}摸摸牠`;
+    else if (d.cows[0].milked < 1) hint = '🐄 左邊牧場的花花等你照顧，點牠看看';
     else if (d.level < 3) hint = '🎒 收成的作物可以在背包賣掉換金幣';
     this.hud.hint(hint);
   }
@@ -792,6 +848,8 @@ export class Game {
     this.farm.update(dt, now, this.weather === 'rain' || this.weather === 'snow');
     this.weeds.update(dt);
     this.mower.update(dt, this.driveInput);
+    this.ranch.update(dt, now, night);
+    if (this.hud.cowMenuOpen) this.placeCowMenu();
     this.player.update(dt);
     const dh = this.sceneLayout.doghouse;
     this.pet.update(dt, { player: this.player, night, doghouse: { x: dh.x, z: dh.z, rotY: dh.rotY }, treasures: this.state.data.treasure.spots });
@@ -811,7 +869,11 @@ export class Game {
     this.fx.update(dt);
 
     this.hudT -= dt;
-    if (this.hudT <= 0) { this.hudT = 0.25; this.refreshHud(); }
+    if (this.hudT <= 0) {
+      this.hudT = 0.25;
+      this.refreshHud();
+      if (this.hud.cowMenuOpen) this.hud.showCowMenu(this.ranch.menu(now));
+    }
     this.saveT -= dt;
     if (this.saveT <= 0) { this.saveT = 10; this.state.save(); }
     this.autoQuality(dt);

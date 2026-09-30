@@ -49,6 +49,19 @@ export const COMBO_WINDOW_MS = 1600;
 // 手推除草機：正式版 Lv45 解鎖；M0 試玩先開放
 export const MOWER_LEVEL = 45;
 export const MOWER_DEMO = true;
+// 割草收集牧草：每割 40 叢得 1 捆
+export const HAY_PER_TUFTS = 40;
+
+// 牧場：乳牛（原規劃第二年，提前到第一年；正式 Lv12 解鎖，M0 試玩先開放）
+export const RANCH_LEVEL = 12;
+export const RANCH_DEMO = true;
+export const MILK_REGEN_MS = 4 * 3600000; // 餵過牧草後 4 小時產奶
+export const COW_HUNGRY_MS = 6 * 3600000; // 餵食後 6 小時會再餓
+export const COW_BRUSH_DAILY = 3;
+export const MILK_SELL = sellPrice(240); // 價值比照 4 小時作物
+export const MILK_XP = cropXp(240);
+export const COW_BOND_THRESHOLDS = [0, 60, 200, 450, 800, 1300];
+export const cowHearts = (p: number): number => COW_BOND_THRESHOLDS.filter((t) => p >= t).length - 1;
 
 // 休息加成：離線每小時累積 DailyXP × 5%，上限 150%
 export const RESTED_PER_HOUR = 0.05;

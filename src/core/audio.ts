@@ -163,6 +163,37 @@ class Sfx {
   }
 
   bump(): void { this.tone(90, 0.12, 'square', 0.18, 55); }
+
+  // ---------- 牧場 ----------
+  // 哞：鋸齒波經過共振峰濾波，音高先升後降
+  moo(happy = false): void {
+    const r = this.ready();
+    if (!r) return;
+    const ctx = r.ctx, t = ctx.currentTime;
+    const dur = happy ? 0.75 : 1.05;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    const base = happy ? 175 : 140;
+    o.frequency.setValueAtTime(base * 0.9, t);
+    o.frequency.linearRampToValueAtTime(base * 1.15, t + dur * 0.35);
+    o.frequency.linearRampToValueAtTime(base * 0.78, t + dur);
+    const f1 = ctx.createBiquadFilter();
+    f1.type = 'bandpass'; f1.frequency.setValueAtTime(520, t); f1.frequency.linearRampToValueAtTime(760, t + dur * 0.4); f1.Q.value = 3;
+    const f2 = ctx.createBiquadFilter();
+    f2.type = 'lowpass'; f2.frequency.value = 1400;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.9, t + 0.12);
+    g.gain.setValueAtTime(0.9, t + dur * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(f1).connect(f2).connect(g).connect(r.out);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+  squirt(alt = false): void { this.noise(0.08, 'highpass', alt ? 3200 : 2600, 0.22); this.tone(alt ? 1150 : 950, 0.06, 'sine', 0.05, alt ? 1500 : 1250); }
+  bell(): void { this.tone(1480, 0.5, 'triangle', 0.06); this.tone(2230, 0.35, 'sine', 0.035, undefined, 0.01); }
+  munch(): void { this.noise(0.07, 'lowpass', 1100, 0.25); }
+  brush(): void { this.noise(0.22, 'bandpass', 1900, 0.16); }
 }
 
 export const sfx = new Sfx();

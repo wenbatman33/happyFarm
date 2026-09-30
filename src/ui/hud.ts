@@ -1,6 +1,7 @@
 import type { HudKey, Layout } from '../config/layout';
 import type { CropDef } from '../data/crops';
-import { xpNext } from '../data/economy';
+import { MILK_SELL, xpNext } from '../data/economy';
+import type { CowAct, CowMenuItem } from '../systems/ranch';
 import { SEASON_LABEL, type Season } from '../core/clock';
 
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
@@ -13,6 +14,8 @@ export const ITEM_INFO: Record<string, { name: string; emoji: string; price: num
   dandelion: { name: '蒲公英', emoji: '🌼', price: 3 },
   clover: { name: '四葉草', emoji: '🍀', price: 50 },
   coin_old: { name: '古錢幣', emoji: '🪙', price: 120 },
+  milk: { name: '牛奶', emoji: '🥛', price: MILK_SELL },
+  hay: { name: '牧草', emoji: '🌾', price: 2 },
 };
 
 export class Hud {
@@ -26,6 +29,9 @@ export class Hud {
   onMute?: () => void;
   onSell?: () => void;
   onMow?: () => void;
+  onCowAct?: (act: CowAct) => void;
+  private cowMenu!: HTMLElement;
+  cowMenuOpen = false;
 
   constructor() {
     this.root = document.createElement('div');
@@ -77,6 +83,18 @@ export class Hud {
     const combo = document.createElement('div');
     combo.id = 'combo';
     document.body.appendChild(combo);
+
+    this.cowMenu = document.createElement('div');
+    this.cowMenu.id = 'cow-menu';
+    this.cowMenu.className = 'hidden';
+    this.cowMenu.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.cowMenu.onclick = (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('button[data-act]');
+      if (!b || b.classList.contains('off')) return;
+      this.hideCowMenu();
+      this.onCowAct?.(b.dataset.act as CowAct);
+    };
+    document.body.appendChild(this.cowMenu);
   }
 
   el(key: HudKey): HTMLElement { return this.els[key]; }
@@ -119,6 +137,29 @@ export class Hud {
     if (el.innerHTML !== html) el.innerHTML = html;
     $('.wx', this.root).textContent = wx;
     $('.coin-n', this.root).textContent = Math.floor(coins).toLocaleString();
+  }
+
+  // 牛隻照顧選單：跟著牛頭在畫面上的位置
+  showCowMenu(m: { title: string; sub: string; items: CowMenuItem[] }): void {
+    const html = `<div class="cm-title">${m.title}</div><div class="cm-sub">${m.sub}</div>` +
+      m.items.map((it) => `<button data-act="${it.act}" class="${it.enabled ? '' : 'off'}"><span class="em">${it.emoji}</span><span class="lb">${it.label}</span><span class="nt">${it.note}</span></button>`).join('');
+    if (this.cowMenu.innerHTML !== html) this.cowMenu.innerHTML = html;
+    if (!this.cowMenuOpen) {
+      this.cowMenu.classList.remove('hidden', 'pop');
+      void this.cowMenu.offsetWidth;
+      this.cowMenu.classList.add('pop');
+    }
+    this.cowMenuOpen = true;
+  }
+
+  moveCowMenu(x: number, y: number): void {
+    this.cowMenu.style.left = `${Math.max(130, Math.min(window.innerWidth - 130, x))}px`;
+    this.cowMenu.style.top = `${Math.max(200, y)}px`;
+  }
+
+  hideCowMenu(): void {
+    this.cowMenuOpen = false;
+    this.cowMenu.classList.add('hidden');
   }
 
   setMower(on: boolean): void { $('.mow-btn', this.root).classList.toggle('on', on); }

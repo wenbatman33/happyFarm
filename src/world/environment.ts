@@ -39,6 +39,7 @@ export class World {
   private smoke: { m: THREE.Mesh; life: number }[] = [];
   private smokeMat = mat('#ffffff', { transparent: true, opacity: 0.7, roughness: 1 });
   private smokeTimer = 0;
+  private troughHay!: THREE.Object3D;
 
   constructor(scene: THREE.Scene, private grid: Grid, private layout: SceneLayout) {
     scene.add(this.root);
@@ -51,6 +52,7 @@ export class World {
     this.addProp('doghouse', this.makeDoghouse(), layout.doghouse);
     this.addProp('mailbox', this.makeMailbox(), layout.mailbox);
     this.addProp('compost', this.makeCompost(), layout.compost);
+    this.buildRanch();
     layout.trees.forEach((t, i) => this.addProp(`tree${i}`, this.makeTree(i), t));
     layout.rocks.forEach((r, i) => this.addProp(`rock${i}`, this.makeRock(i), r));
     this.rebuildGrid();
@@ -98,6 +100,16 @@ export class World {
       }
     }
     for (let z = Math.round(L.house.z + 3.5); z <= 13; z++) g.path[g.idx(Math.round(L.house.x), z)] = 1;
+    // 牧場：柵欄在 cx±3、cz±2.5 的格線上，東側中間兩格是門
+    const rx = Math.round(L.ranch.x), rz = L.ranch.z;
+    const z0 = Math.round(rz - 2.5), z1 = Math.round(rz + 2.5);
+    for (let z = z0; z <= z1; z++) {
+      g.blocked[g.idx(rx - 3, z)] = 1;
+      if (Math.abs(z - rz) > 1) g.blocked[g.idx(rx + 3, z)] = 1;
+    }
+    for (let x = rx - 3; x <= rx + 3; x++) { g.blocked[g.idx(x, z0)] = 1; g.blocked[g.idx(x, z1)] = 1; }
+    g.blockRect(rx - 1.6, rz - 1.35, 1.6, 0.6); // 穀倉
+    g.blockRect(rx - 3.9, rz - 1.8, 0.3, 0.3); // 乾草堆
   }
 
   // ---------- 地面、草、花 ----------
@@ -373,6 +385,110 @@ export class World {
     geo.userData.base = arr.slice();
     this.fireflies = new THREE.Points(geo, new THREE.PointsMaterial({ color: '#fff4a8', size: 0.16, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
     this.root.add(this.fireflies);
+  }
+
+
+  // ---------- 牧場 ----------
+  // 牛站的照顧位置、主角站的位置（都是世界座標）
+  get cowCareSpot(): { x: number; z: number } { const r = this.layout.ranch; return { x: r.x + 0.8, z: r.z - 0.8 }; }
+  get cowSleepSpot(): { x: number; z: number } { const r = this.layout.ranch; return { x: r.x - 1.6, z: r.z - 0.1 }; }
+  get ranchBounds(): { x0: number; x1: number; z0: number; z1: number } { const r = this.layout.ranch; return { x0: r.x - 2, x1: r.x + 2, z0: r.z - 0.9, z1: r.z + 1.6 }; }
+
+  setTroughHay(on: boolean): void { this.troughHay.visible = on; }
+
+  private buildRanch() {
+    const r = this.layout.ranch;
+    const g = new THREE.Group();
+    g.position.set(r.x, 0, r.z);
+    this.root.add(g);
+    const white = mat('#f6f0e4', { roughness: 0.7 });
+    // 柵欄（東側留門）
+    const post = rbox(0.14, 0.9, 0.14, 0.05);
+    const addPost = (x: number, z: number) => { const m = mesh(post, white); m.position.set(x, 0.45, z); g.add(m); };
+    const addRail = (x1: number, z1: number, x2: number, z2: number) => {
+      const len = Math.hypot(x2 - x1, z2 - z1);
+      for (const h of [0.38, 0.7]) {
+        const m = mesh(rbox(len, 0.09, 0.06, 0.03), white);
+        m.position.set((x1 + x2) / 2, h, (z1 + z2) / 2);
+        m.rotation.y = Math.atan2(-(z2 - z1), x2 - x1);
+        g.add(m);
+      }
+      const n = Math.max(1, Math.round(len / 1.2));
+      for (let i = 0; i <= n; i++) addPost(x1 + ((x2 - x1) * i) / n, z1 + ((z2 - z1) * i) / n);
+    };
+    addRail(-3, -2.5, 3, -2.5);
+    addRail(-3, 2.5, 3, 2.5);
+    addRail(-3, -2.5, -3, 2.5);
+    addRail(3, -2.5, 3, -0.9);
+    addRail(3, 0.9, 3, 2.5);
+    // 紅色小穀倉（門朝南，也就是鏡頭這側）
+    const barn = new THREE.Group();
+    barn.position.set(-1.6, 0, -1.35);
+    const red = mat('#c9453a', { roughness: 0.75 });
+    const body = mesh(rbox(1.9, 1.3, 1.4, 0.08), red);
+    body.position.y = 0.65;
+    barn.add(body);
+    for (const s of [1, -1]) {
+      const roof = mesh(rbox(2.2, 0.1, 0.95, 0.04), mat('#5b4a44'));
+      roof.position.set(0, 1.58, s * 0.36);
+      roof.rotation.x = s * 0.62;
+      barn.add(roof);
+    }
+    const tri = new THREE.Shape();
+    tri.moveTo(-0.95, 0); tri.lineTo(0.95, 0); tri.lineTo(0, 0.58); tri.closePath();
+    const gable = mesh(new THREE.ExtrudeGeometry(tri, { depth: 1.3, bevelEnabled: false }), red);
+    gable.position.set(0, 1.3, -0.65);
+    barn.add(gable);
+    const door = mesh(rbox(0.8, 0.95, 0.06, 0.03), mat('#8a2f28'));
+    door.position.set(0, 0.5, 0.71);
+    barn.add(door);
+    for (const rz of [0.75, -0.75]) {
+      const x = mesh(rbox(1.05, 0.07, 0.04, 0.02), white, false);
+      x.position.set(0, 0.5, 0.75);
+      x.rotation.z = rz;
+      barn.add(x);
+    }
+    const trimTop = mesh(rbox(0.86, 0.07, 0.05, 0.02), white, false);
+    trimTop.position.set(0, 0.99, 0.74);
+    barn.add(trimTop);
+    g.add(barn);
+    // 飼料槽：沿北側柵欄，餵過才看得到牧草
+    const trough = new THREE.Group();
+    trough.position.set(0.8, 0, -1.95);
+    const wood = mat('#a8804e');
+    const tBody = mesh(rbox(1.4, 0.36, 0.5, 0.05), wood);
+    tBody.position.y = 0.3;
+    const tIn = mesh(rbox(1.25, 0.05, 0.36, 0.02), mat('#5e4128'), false);
+    tIn.position.y = 0.46;
+    trough.add(tBody, tIn);
+    for (const lx of [-0.55, 0.55]) {
+      const leg = mesh(rbox(0.1, 0.16, 0.4, 0.03), wood);
+      leg.position.set(lx, 0.08, 0);
+      trough.add(leg);
+    }
+    const hay = new THREE.Group();
+    const hayMat = mat('#e8c65a', { roughness: 0.9 });
+    for (let i = 0; i < 9; i++) {
+      const h = mesh(GEO.sphereLo, hayMat, false);
+      h.scale.set(0.34, 0.14, 0.26);
+      h.position.set(-0.5 + (i % 5) * 0.25, 0.52 + (i > 4 ? 0.05 : 0), (i % 2 ? 0.06 : -0.06));
+      hay.add(h);
+    }
+    trough.add(hay);
+    this.troughHay = hay;
+    g.add(trough);
+    // 柵欄外的乾草捆
+    const bales = new THREE.Group();
+    bales.position.set(-3.9, 0, -1.8);
+    const baleGeo = rbox(0.9, 0.5, 0.55, 0.12);
+    const baleMat = mat('#e2bd55', { roughness: 0.95 });
+    [[0, 0.25, 0], [0.1, 0.75, 0.05], [-0.05, 0.25, 0.6]].forEach(([x, y, z], i) => {
+      const b = mesh(baleGeo, baleMat);
+      b.position.set(x, y, z);
+      b.rotation.y = i * 0.4;
+      bales.add(b);
+    });
+    g.add(bales);
   }
 
   // ---------- 房屋 ----------

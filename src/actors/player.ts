@@ -1,11 +1,12 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GEO, mat, mesh, withRim } from '../world/materials';
 import type { Grid } from '../world/grid';
 import { tileOf } from '../world/grid';
 import { Mover } from './mover';
 import { clamp, lerp } from '../core/rng';
 
-export type ActionAnim = 'pull' | 'hoe' | 'plant' | 'water' | 'harvest' | 'pet' | 'sickle' | 'celebrate';
+export type ActionAnim = 'pull' | 'hoe' | 'plant' | 'water' | 'harvest' | 'pet' | 'sickle' | 'celebrate' | 'feed' | 'brush' | 'milk';
 
 // 動作長度（秒）與「作用點」（0..1，這時候才真的拔起、澆到水）
 export const ANIM_SPEC: Record<ActionAnim, { dur: number; impact: number; tool?: string }> = {
@@ -17,6 +18,9 @@ export const ANIM_SPEC: Record<ActionAnim, { dur: number; impact: number; tool?:
   pet: { dur: 1.2, impact: 0.25 },
   sickle: { dur: 0.45, impact: 0.5, tool: 'sickle' },
   celebrate: { dur: 1.0, impact: 0.5 },
+  feed: { dur: 0.85, impact: 0.55, tool: 'hay' },
+  brush: { dur: 1.7, impact: 0.3, tool: 'brush' },
+  milk: { dur: 3.4, impact: 0.93 },
 };
 
 interface Pose { y: number; sy: number; lean: number; twist: number; aLx: number; aLz: number; aRx: number; aRz: number; lL: number; lR: number; head: number; toolTilt: number }
@@ -43,6 +47,9 @@ export class Player {
   private idleT = 0;
   private anim: { name: ActionAnim; t: number; fired: boolean; onImpact?: () => void; onDone?: () => void } | null = null;
   onTugTick?: () => void;
+  onSquirt?: (alt: boolean) => void; // 擠奶：每擠一下
+  onBrushStroke?: () => void;
+  private squirtN = 0;
   pushing = false; // 推除草機中（移動由 Mower 控制）
   pushSpeed = 0;
 
@@ -181,13 +188,29 @@ export class Player {
     sb.position.set(0.18, 0.17, 0); sb.rotation.z = 0.2;
     sickle.add(sh, sb);
     sickle.rotation.x = Math.PI / 2;
-    this.tools = { hoe, can, bag, sickle };
+    // 一捆牧草、刷子
+    const hay = new THREE.Group();
+    for (let i = 0; i < 5; i++) {
+      const h = mesh(GEO.sphereLo, mat('#e8c65a', { roughness: 0.9 }));
+      h.scale.set(0.12, 0.3, 0.12);
+      h.position.set((i - 2) * 0.05, 0, 0.1);
+      h.rotation.z = (i - 2) * 0.2;
+      hay.add(h);
+    }
+    const brushT = new THREE.Group();
+    const bb = mesh(new RoundedBoxGeometry(0.26, 0.08, 0.14, 1, 0.03), mat('#b07a48'));
+    const br = mesh(new RoundedBoxGeometry(0.24, 0.06, 0.12, 1, 0.02), mat('#5a3e2a', { roughness: 1 }));
+    br.position.y = -0.06;
+    brushT.add(bb, br);
+    brushT.position.set(0, -0.06, 0.08);
+    this.tools = { hoe, can, bag, sickle, hay, brush: brushT };
     for (const t of Object.values(this.tools)) { t.visible = false; this.handR.add(t); }
   }
 
   // 播放動作；onImpact 在作用點觸發，onDone 在動作結束
   play(name: ActionAnim, onImpact?: () => void, onDone?: () => void): void {
     this.anim = { name, t: 0, fired: false, onImpact, onDone };
+    this.squirtN = 0;
     for (const [k, t] of Object.entries(this.tools)) t.visible = k === ANIM_SPEC[name].tool;
   }
 
@@ -215,6 +238,14 @@ export class Player {
       const u = clamp(this.anim.t / spec.dur, 0, 1);
       this.poseFor(this.anim.name, u, g);
       if (this.anim.name === 'pull' && u > 0.28 && u < 0.62 && Math.random() < dt * 8) this.onTugTick?.();
+      if (this.anim.name === 'milk' && u > 0.1 && u < 0.9) {
+        const n = Math.floor((this.anim.t - spec.dur * 0.1) / 0.24);
+        if (n >= this.squirtN) { this.squirtN = n + 1; this.onSquirt?.(n % 2 === 1); }
+      }
+      if (this.anim.name === 'brush') {
+        const n = Math.floor(this.anim.t / 0.42);
+        if (n >= this.squirtN) { this.squirtN = n + 1; this.onBrushStroke?.(); }
+      }
       if (!this.anim.fired && u >= spec.impact) { this.anim.fired = true; this.anim.onImpact?.(); }
       if (u >= 1) {
         const done = this.anim.onDone;
@@ -336,6 +367,41 @@ export class Player {
         g.aRz = -0.9 * w + 0.9 * sw;
         g.lean = 0.2 * (1 - r);
         g.y = -0.08 * (1 - r);
+        break;
+      }
+      case 'feed': {
+        // 抱著牧草 → 往前拋進飼料槽
+        const hold = seg(0, 0.4), toss = seg(0.4, 0.6), r = seg(0.6, 1);
+        g.aLx = g.aRx = (-0.9 * hold - 1.1 * toss) * (1 - r);
+        g.aLz = 0.1; g.aRz = -0.1;
+        g.lean = -0.1 * hold + 0.35 * toss * (1 - r);
+        g.y = -0.05 * hold * (1 - toss);
+        break;
+      }
+      case 'brush': {
+        // 一下一下順著毛刷
+        const c = seg(0, 0.15), r = seg(0.88, 1);
+        const stroke = Math.sin(u * Math.PI * 8);
+        g.aRx = (-1.35 + stroke * 0.25) * c * (1 - r);
+        g.aRz = (-0.35 + stroke * 0.3) * c * (1 - r);
+        g.aLx = -0.3 * c * (1 - r);
+        g.lean = 0.15 * c * (1 - r);
+        g.twist = stroke * 0.12 * c * (1 - r);
+        break;
+      }
+      case 'milk': {
+        // 坐在小板凳上，雙手輪流擠
+        const sit = seg(0, 0.1), up = seg(0.93, 1);
+        const sq = Math.sin(u * 3.4 / 0.24 * Math.PI);
+        const on = sit * (1 - up);
+        g.y = -0.36 * on;
+        g.sy = 1 - 0.06 * on;
+        g.lean = 0.28 * on;
+        g.lL = g.lR = -1.35 * on;
+        g.aLx = (-1.0 + sq * 0.28) * on;
+        g.aRx = (-1.0 - sq * 0.28) * on;
+        g.aLz = 0.05; g.aRz = -0.05;
+        g.head = Math.sin(u * 6) * 0.08 * on;
         break;
       }
       case 'celebrate': {

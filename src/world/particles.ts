@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GEO } from './materials';
 
 // 簡易粒子池：泥土、草屑、水滴、閃光、愛心、落葉、雪
-export type ParticleKind = 'dirt' | 'grass' | 'water' | 'sparkle' | 'heart' | 'leaf' | 'snow' | 'seed' | 'fluff' | 'zzz';
+export type ParticleKind = 'dirt' | 'grass' | 'water' | 'sparkle' | 'heart' | 'leaf' | 'snow' | 'seed' | 'fluff' | 'zzz' | 'milk' | 'hay';
 
 interface P {
   obj: THREE.Object3D;
@@ -69,6 +69,8 @@ const mats = {
   snow: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.8 }),
   seed: new THREE.MeshStandardMaterial({ color: '#f1dfb0', roughness: 0.8 }),
   fluff: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, emissive: '#ffffff', emissiveIntensity: 0.3 }),
+  milk: new THREE.MeshStandardMaterial({ color: '#fffdf6', roughness: 0.2, emissive: '#fff8e8', emissiveIntensity: 0.25 }),
+  hay: new THREE.MeshStandardMaterial({ color: '#e8c65a', roughness: 0.9 }),
   heart: new THREE.SpriteMaterial({ map: heartTex, depthWrite: false }),
   sparkle: new THREE.SpriteMaterial({ map: starTex, depthWrite: false, blending: THREE.AdditiveBlending }),
   zzz: new THREE.SpriteMaterial({ map: zTex, depthWrite: false, opacity: 0.85 }),
@@ -88,7 +90,7 @@ export class Particles {
     if (!obj) {
       if (sprite) obj = new THREE.Sprite(mats[kind as 'heart']);
       else {
-        const geo = kind === 'grass' || kind === 'leaf' ? GEO.blade : GEO.sphereLo;
+        const geo = kind === 'grass' || kind === 'leaf' || kind === 'hay' ? GEO.blade : GEO.sphereLo;
         const m = new THREE.Mesh(geo, mats[kind as 'dirt']);
         m.castShadow = false;
         obj = m;

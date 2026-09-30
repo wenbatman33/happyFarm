@@ -236,6 +236,7 @@ export class Mower {
     const deck = this.deckPos();
     const now = g.state.now();
     let cut = g.world.mowGrass(deck.x, deck.z, CUT_R, now);
+    if (cut) g.addHayProgress(cut);
     const hits = g.weeds.list.filter((w) => Math.hypot(w.tx + w.ox - deck.x, w.tz + w.oz - deck.z) < CUT_R + 0.18);
     for (const w of hits) g.mowWeed(w);
     if (hits.length) { cut += 4 * hits.length; navigator.vibrate?.(18); }

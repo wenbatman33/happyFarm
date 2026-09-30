@@ -98,6 +98,22 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: 0; }
 #combo.pop { animation: combopop 0.9s ease-out; }
 @keyframes combopop { 0% { opacity: 0; transform: translate(-50%, -80%) scale(0.5); } 15% { opacity: 1; transform: translate(-50%, -110%) scale(1.25); } 30% { transform: translate(-50%, -110%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -160%) scale(1); } }
 
+/* ---------- 牛隻照顧選單 ---------- */
+#cow-menu { position: fixed; z-index: 20; transform: translate(-50%, calc(-100% - 14px)); background: var(--cream); border-radius: 22px; padding: 12px 12px 10px; width: 240px; box-shadow: var(--shadow); }
+#cow-menu::after { content: ''; position: absolute; left: 50%; bottom: -10px; transform: translateX(-50%); border: 10px solid transparent; border-bottom: 0; border-top-color: var(--cream); }
+#cow-menu.pop { animation: cowpop 0.3s cubic-bezier(.3,1.6,.6,1); }
+@keyframes cowpop { from { transform: translate(-50%, calc(-100% - 14px)) scale(0.6); opacity: 0; } }
+.cm-title { font-weight: 800; font-size: 17px; padding: 0 4px; }
+.cm-title { color: var(--ink); }
+.cm-sub { font-size: 13px; color: var(--ink-soft); padding: 0 4px 8px; font-weight: 700; }
+#cow-menu button { display: grid; grid-template-columns: 1.8em 1fr auto; align-items: center; gap: 6px; width: 100%; background: #fff; border-radius: 14px; padding: 8px 10px; margin-top: 6px; box-shadow: inset 0 -3px 0 #ecdcc0; text-align: left; transition: transform 0.12s; }
+#cow-menu button:active { transform: scale(0.96); }
+#cow-menu button .em { font-size: 22px; }
+#cow-menu button .lb { font-weight: 800; font-size: 15px; }
+#cow-menu button .nt { font-size: 11px; color: var(--ink-soft); font-weight: 700; }
+#cow-menu button.off { opacity: 0.5; cursor: default; }
+#cow-menu button:not(.off) { background: #fff7d6; box-shadow: inset 0 -3px 0 #f0d27a; }
+
 /* ---------- 面板 ---------- */
 .panel { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(40, 30, 20, 0.35); }
 .panel-card { background: var(--cream); border-radius: 28px; padding: 18px 20px; width: min(420px, 92vw); max-height: 80vh; overflow: auto; box-shadow: var(--shadow); animation: toastpop 0.3s cubic-bezier(.3,1.5,.6,1); }
