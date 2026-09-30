@@ -6,7 +6,7 @@ import { tileOf } from '../world/grid';
 import { Mover } from './mover';
 import { clamp, lerp } from '../core/rng';
 
-export type ActionAnim = 'pull' | 'hoe' | 'plant' | 'water' | 'harvest' | 'pet' | 'sickle' | 'celebrate' | 'feed' | 'brush' | 'milk';
+export type ActionAnim = 'pull' | 'hoe' | 'plant' | 'water' | 'harvest' | 'pet' | 'sickle' | 'celebrate' | 'feed' | 'brush' | 'milk' | 'chop' | 'mine' | 'fert';
 
 // 動作長度（秒）與「作用點」（0..1，這時候才真的拔起、澆到水）
 export const ANIM_SPEC: Record<ActionAnim, { dur: number; impact: number; tool?: string }> = {
@@ -21,6 +21,9 @@ export const ANIM_SPEC: Record<ActionAnim, { dur: number; impact: number; tool?:
   feed: { dur: 0.85, impact: 0.55, tool: 'hay' },
   brush: { dur: 1.7, impact: 0.3, tool: 'brush' },
   milk: { dur: 3.4, impact: 0.93 },
+  chop: { dur: 0.5, impact: 0.56, tool: 'axe' },
+  mine: { dur: 0.5, impact: 0.56, tool: 'pick' },
+  fert: { dur: 0.45, impact: 0.5, tool: 'fertbag' },
 };
 
 interface Pose { y: number; sy: number; lean: number; twist: number; aLx: number; aLz: number; aRx: number; aRz: number; lL: number; lR: number; head: number; toolTilt: number }
@@ -203,7 +206,20 @@ export class Player {
     br.position.y = -0.06;
     brushT.add(bb, br);
     brushT.position.set(0, -0.06, 0.08);
-    this.tools = { hoe, can, bag, sickle, hay, brush: brushT };
+    // 斧頭、鎬、肥料袋
+    const metalM = mat('#b8c2cc', { metalness: 0.5, roughness: 0.35 });
+    const axe = new THREE.Group();
+    const ah = mesh(GEO.cyl, woodM); ah.scale.set(0.05, 0.9, 0.05); ah.position.y = 0.18;
+    const ab = mesh(new RoundedBoxGeometry(0.08, 0.22, 0.2, 1, 0.03), metalM); ab.position.set(0, 0.58, 0.08);
+    axe.add(ah, ab);
+    axe.rotation.x = Math.PI / 2;
+    const pick = new THREE.Group();
+    const ph = mesh(GEO.cyl, woodM); ph.scale.set(0.05, 0.9, 0.05); ph.position.y = 0.18;
+    const pb = mesh(new THREE.TorusGeometry(0.2, 0.03, 6, 14, Math.PI * 0.9), metalM); pb.position.set(0, 0.5, 0); pb.rotation.set(0, Math.PI / 2, Math.PI * 0.05);
+    pick.add(ph, pb);
+    pick.rotation.x = Math.PI / 2;
+    const fertbag = mesh(GEO.sphere, mat('#7a9a4a')); fertbag.scale.set(0.2, 0.24, 0.18); fertbag.position.y = -0.08;
+    this.tools = { hoe, can, bag, sickle, hay, brush: brushT, axe, pick, fertbag };
     for (const t of Object.values(this.tools)) { t.visible = false; this.handR.add(t); }
   }
 
@@ -302,7 +318,7 @@ export class Player {
     this.eyes.forEach((e) => (e.scale.y = closed ? 0.15 : 1));
   }
 
-  private poseFor(name: ActionAnim, u: number, g: Pose) {
+  private poseFor(name: ActionAnim, u: number, g: Pose): void {
     const seg = (a: number, b: number) => clamp((u - a) / (b - a), 0, 1);
     switch (name) {
       case 'pull': {
@@ -327,6 +343,13 @@ export class Player {
         g.aLz = 0.2; g.aRz = -0.2;
         break;
       }
+      case 'chop':
+      case 'mine':
+        this.poseFor('hoe', u, g);
+        return;
+      case 'fert':
+        this.poseFor('plant', u, g);
+        return;
       case 'plant': {
         const c = seg(0, 0.4), toss = seg(0.4, 0.6), r = seg(0.6, 1);
         g.y = -0.14 * c * (1 - r);

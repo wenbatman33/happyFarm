@@ -199,6 +199,12 @@ class Sfx {
   }
   munch(): void { this.noise(0.07, 'lowpass', 1100, 0.25); }
   brush(): void { this.noise(0.22, 'bandpass', 1900, 0.16); }
+  chop(): void { this.tone(190, 0.09, 'square', 0.16, 110); this.noise(0.08, 'lowpass', 1200, 0.3); }
+  mine(): void { this.tone(1750, 0.12, 'triangle', 0.14, 1500); this.noise(0.06, 'highpass', 3000, 0.2); }
+  crumble(): void { this.noise(0.35, 'lowpass', 700, 0.45); this.tone(90, 0.2, 'sine', 0.3, 50); }
+  hammer(v = 1): void { if (v < 0.02) return; this.tone(820 + Math.random() * 120, 0.06, 'square', 0.07 * v, 500); }
+  fanfare(): void { [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => this.tone(f, i === 6 ? 0.6 : 0.18, 'triangle', 0.28, undefined, i * 0.11)); }
+  paper(): void { this.noise(0.18, 'highpass', 2400, 0.12); }
 }
 
 export const sfx = new Sfx();

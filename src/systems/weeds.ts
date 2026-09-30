@@ -5,7 +5,7 @@ import { hashStr, mulberry32 } from '../core/rng';
 import { WEED_SPAWN_MS } from '../data/economy';
 import type { Grid, Tile } from '../world/grid';
 import { buildWeed, type WeedKind } from '../world/weeds3d';
-import type { Farm } from './farm';
+import { FIELD_COLS, FIELD_ROWS, type Farm } from './farm';
 import type { GameState, WeedSave } from './state';
 
 // 雜草生長區（docs/03 §4.1）
@@ -20,6 +20,7 @@ export class Weeds {
   root = new THREE.Group();
   private views = new Map<string, WeedView>();
   queued = new Set<string>();
+  extraBlocked?: (x: number, z: number) => boolean; // 其他東西（障礙物）佔用的格子
   private zones: Zone[];
 
   constructor(parent: THREE.Object3D, private state: GameState, private grid: Grid, private layout: SceneLayout, private farm: Farm) {
@@ -28,14 +29,14 @@ export class Weeds {
       { name: 'house', cap: 10, tiles: () => this.ring(this.layout.house.x, this.layout.house.z, 3.5, 3.0, 5.2, 4.6) },
       { name: 'path', cap: 8, tiles: () => this.pathSides() },
       { name: 'fence', cap: 8, tiles: () => this.fenceEdge() },
-      { name: 'field', cap: 10, tiles: () => this.ring(this.layout.field.x + 1.5, this.layout.field.z + 1, 2.5, 2.0, 3.6, 3.1) },
+      { name: 'field', cap: 10, tiles: () => { const iw = FIELD_COLS / 2, id = FIELD_ROWS / 2; return this.ring(this.layout.field.x + (FIELD_COLS - 1) / 2, this.layout.field.z + (FIELD_ROWS - 1) / 2, iw, id, iw + 1.1, id + 1.1); } },
     ];
   }
 
   get list(): WeedSave[] { return this.state.data.weeds; }
 
   private free(x: number, z: number): boolean {
-    return !this.grid.isBlocked(x, z) && !this.grid.path[this.grid.idx(x, z)] && this.farm.indexAt(x, z) < 0;
+    return !this.grid.isBlocked(x, z) && !this.grid.path[this.grid.idx(x, z)] && this.farm.indexAt(x, z) < 0 && !this.extraBlocked?.(x, z);
   }
 
   // 矩形外環：內框（半寬 iw、半深 id）以外、外框以內的格子

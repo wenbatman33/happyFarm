@@ -1,13 +1,17 @@
 import { clock, dayKey } from '../core/clock';
 import { NEWBIE_LEVEL, NEWBIE_XP_MULT, RESTED_CAP, RESTED_PER_HOUR, dailyXp, xpNext } from '../data/economy';
 import type { WeedKind } from '../world/weeds3d';
+import { FIELD_COLS, FIELD_COUNT, STARTER_PLOTS, UNLOCK_ORDER } from './farm';
+import { plotsForLevel } from '../data/economy';
 
 export const SAVE_KEY = 'happyFarm.save';
 export const SCHEMA_VERSION = 1;
 
-export interface PlotSave { tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number }
+export interface PlotSave { owned: boolean; tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number; fert: boolean }
 export interface WeedSave { id: string; tx: number; tz: number; ox: number; oz: number; kind: WeedKind; bornAt: number; pulls: number; zone: string }
 export interface TreasureSpot { id: string; x: number; z: number }
+export interface OrderSave { id: string; items: { key: string; n: number }[]; coins: number; xp: number; done: boolean }
+export interface DebrisSave { id: string; x: number; z: number; kind: 'stone' | 'boulder' | 'stump' | 'log'; hits: number; rot: number }
 export interface CowSave { name: string; affection: number; fedAt: number; milkReadyAt: number | null; brushDay: string; brushes: number; milked: number }
 
 export interface SaveData {
@@ -25,18 +29,28 @@ export interface SaveData {
   zones: Record<string, number>;
   weedSeq: number;
   pet: { name: string; bond: number; touchDay: string; touches: number };
-  stats: { weedsPulled: number; harvests: number; bestCombo: number };
+  stats: { weedsPulled: number; harvests: number; bestCombo: number; ordersDone: number };
   selectedSeed: string;
   houseTier: number;
   treasure: { day: string; spots: TreasureSpot[] };
   cows: CowSave[];
   hayProgress: number;
+  debris: DebrisSave[];
+  debrisDay: string;
+  debrisSeq: number;
+  compost: number[]; // 每批完成的時間
+  selectedTool: 'seed' | 'fert';
+  house: { tier: number; buildUntil: number | null };
+  tutorial: number; // 新手引導進度（-1＝已完成）
+  orders: { slot: string; list: OrderSave[]; skipAt: number; seq: number; seen: boolean };
 }
 
 // 新的乳牛：一開始奶是滿的、肚子餓（第一次見面就能擠奶、餵草）
 export function freshCow(): CowSave {
   return { name: '花花', affection: 0, fedAt: 0, milkReadyAt: 0, brushDay: '', brushes: 0, milked: 0 };
 }
+
+const freshPlot = (now: number, owned: boolean): PlotSave => ({ owned, tilled: false, cropId: null, p0: 0, snapAt: now, wetUntil: 0, fert: false });
 
 export function freshSave(now: number): SaveData {
   return {
@@ -49,17 +63,25 @@ export function freshSave(now: number): SaveData {
     coins: 120,
     rested: 0,
     inventory: { hay: 5 },
-    plots: Array.from({ length: 12 }, () => ({ tilled: false, cropId: null, p0: 0, snapAt: now, wetUntil: 0 })),
+    plots: Array.from({ length: FIELD_COUNT }, (_, i) => freshPlot(now, UNLOCK_ORDER.indexOf(i) < STARTER_PLOTS)),
     weeds: [],
     zones: {},
     weedSeq: 0,
     pet: { name: '麻糬', bond: 0, touchDay: '', touches: 0 },
-    stats: { weedsPulled: 0, harvests: 0, bestCombo: 0 },
+    stats: { weedsPulled: 0, harvests: 0, bestCombo: 0, ordersDone: 0 },
     selectedSeed: 'radish',
     houseTier: 1,
     treasure: { day: '', spots: [] },
     cows: [freshCow()],
     hayProgress: 0,
+    debris: [],
+    debrisDay: '',
+    debrisSeq: 0,
+    compost: [],
+    selectedTool: 'seed',
+    house: { tier: 1, buildUntil: null },
+    tutorial: 0,
+    orders: { slot: '', list: [], skipAt: 0, seq: 0, seen: false },
   };
 }
 
@@ -69,6 +91,26 @@ function migrate(d: SaveData): SaveData {
   // 牧場（2026-09-30 加入）：舊存檔補上乳牛與起始牧草
   if (!d.cows) { d.cows = [freshCow()]; d.inventory.hay = (d.inventory.hay ?? 0) + 5; }
   if (d.hayProgress === undefined) d.hayProgress = 0;
+  // M1（2026-09-30）：田區 4×3 → 6×5，舊田的內容搬到新座標；已解鎖的田視為已擁有
+  if (d.plots.length === 12) {
+    const old = d.plots as unknown as Omit<PlotSave, 'owned' | 'fert'>[];
+    const oldOrder = [0, 1, 2, 4, 5, 6, 8, 9, 10, 3, 7, 11];
+    const cap = plotsForLevel(d.level);
+    const now = d.maxSeen;
+    const plots = Array.from({ length: FIELD_COUNT }, () => freshPlot(now, false));
+    old.forEach((p, i) => {
+      const ni = Math.floor(i / 4) * FIELD_COLS + (i % 4);
+      plots[ni] = { ...p, owned: oldOrder.indexOf(i) < Math.min(cap, 12), fert: false };
+    });
+    d.plots = plots;
+  }
+  if (!d.debris) { d.debris = []; d.debrisDay = ''; d.debrisSeq = 0; }
+  if (!d.compost) d.compost = [];
+  if (!d.selectedTool) d.selectedTool = 'seed';
+  if (!d.house) d.house = { tier: d.houseTier ?? 1, buildUntil: null };
+  if (d.tutorial === undefined) d.tutorial = -1; // 舊玩家不再跑新手引導
+  if (!d.orders) d.orders = { slot: '', list: [], skipAt: 0, seq: 0, seen: false };
+  if (d.stats.ordersDone === undefined) d.stats.ordersDone = 0;
   return d;
 }
 

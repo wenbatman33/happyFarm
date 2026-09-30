@@ -174,7 +174,13 @@ export class DevTools {
     af.add({ f: () => { g.state.data.cows[0].brushes = 0; } }, 'f').name('🪮 重置刷毛次數');
     af.add({ f: () => g.state.addItem('hay', 10) }, 'f').name('🌾 +10 牧草');
     af.add({ f: () => g.player.play('celebrate') }, 'f').name('🙌 主角慶祝');
-    af.add({ f: () => { const t = g.world.houseTier === 1 ? 2 : 1; g.world.setHouseTier(t); g.state.data.houseTier = t; } }, 'f').name('🏠 房屋 T1 ⇄ T2');
+    af.add({ f: () => { const h = g.state.data.house; h.buildUntil = null; g.world.setScaffold(false); h.tier = h.tier === 1 ? 2 : 1; g.world.setHouseTier(h.tier); } }, 'f').name('🏠 房屋 T1 ⇄ T2');
+    af.add({ f: () => { const h = g.state.data.house; if (h.buildUntil) h.buildUntil = g.state.now(); } }, 'f').name('🔨 施工立即完成');
+    af.add({ f: () => { g.state.addItem('wood', 20); g.state.addItem('stone', 20); } }, 'f').name('🪵 +20 木材、+20 石材');
+    af.add({ f: () => { g.state.addItem('fert', 5); g.state.addItem('weed', 20); } }, 'f').name('🧪 +5 有機肥、+20 雜草');
+    af.add({ f: () => { g.state.data.compost = g.state.data.compost.map(() => 0); } }, 'f').name('🪣 堆肥立即完成');
+    af.add({ f: () => { g.orders.d.slot = ''; g.orders.refresh(g.state.now()); } }, 'f').name('📬 刷新訂單');
+    af.add({ f: () => { g.state.data.tutorial = 0; void g.tutorial.start(); } }, 'f').name('🎓 重跑新手引導');
     af.add({ f: () => { if (confirm('確定要重設存檔？')) { g.state.reset(); localStorage.removeItem('happyFarm.save'); location.reload(); } } }, 'f').name('🗑 重設存檔');
     af.close();
 

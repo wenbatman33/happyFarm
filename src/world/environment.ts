@@ -6,6 +6,7 @@ import type { Season } from '../core/clock';
 import { mulberry32 } from '../core/rng';
 import { GEO, mat, mesh, withWind } from './materials';
 import type { Grid } from './grid';
+import { FIELD_COLS, FIELD_ROWS } from '../systems/farm';
 
 const rbox = (w: number, h: number, d: number, r = 0.06, seg = 2) => new RoundedBoxGeometry(w, h, d, seg, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
 
@@ -40,6 +41,9 @@ export class World {
   private smokeMat = mat('#ffffff', { transparent: true, opacity: 0.7, roughness: 1 });
   private smokeTimer = 0;
   private troughHay!: THREE.Object3D;
+  private scaffold: THREE.Group | null = null;
+  private mailFlag!: THREE.Object3D;
+  onRebuildGrid?: () => void; // 讓其他系統（障礙物）補上自己的阻擋格
 
   constructor(scene: THREE.Scene, private grid: Grid, private layout: SceneLayout) {
     scene.add(this.root);
@@ -110,6 +114,7 @@ export class World {
     for (let x = rx - 3; x <= rx + 3; x++) { g.blocked[g.idx(x, z0)] = 1; g.blocked[g.idx(x, z1)] = 1; }
     g.blockRect(rx - 1.6, rz - 1.35, 1.6, 0.6); // 穀倉
     g.blockRect(rx - 3.9, rz - 1.8, 0.3, 0.3); // 乾草堆
+    this.onRebuildGrid?.();
   }
 
   // ---------- 地面、草、花 ----------
@@ -196,7 +201,7 @@ export class World {
       if (!isIn && Math.abs(x) < 14.5 && Math.abs(z) < 14.5) continue;
       if (isIn && this.grid.isBlocked(Math.round(x), Math.round(z))) continue;
       if (Math.abs(x - L.house.x) < 3.8 && Math.abs(z - L.house.z) < 3.4) continue;
-      if (x > L.field.x - 0.9 && x < L.field.x + 3.9 && z > L.field.z - 0.9 && z < L.field.z + 2.9) continue;
+      if (x > L.field.x - 0.9 && x < L.field.x + FIELD_COLS - 0.1 && z > L.field.z - 0.9 && z < L.field.z + FIELD_ROWS - 0.1) continue;
       if (Math.abs(x - L.house.x) < 0.9 && z > L.house.z) continue;
       d.x[n] = x;
       d.z[n] = z;
@@ -491,6 +496,50 @@ export class World {
     g.add(bales);
   }
 
+  setMailFlag(up: boolean): void {
+    const goal = up ? 0 : -Math.PI / 2;
+    this.mailFlag.rotation.x += (goal - this.mailFlag.rotation.x) * 0.15;
+  }
+
+  // 施工鷹架：房屋修繕期間顯示
+  setScaffold(on: boolean): void {
+    if (on === !!this.scaffold) return;
+    const house = this.props.get('house')!;
+    if (!on) { house.obj.remove(this.scaffold!); this.scaffold = null; return; }
+    const g = new THREE.Group();
+    const pole = mat('#c9a06a', { roughness: 0.85 });
+    const plank = mat('#e0bd86', { roughness: 0.85 });
+    const W = 3.3, D = 2.75;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const p = mesh(GEO.cyl, pole);
+      p.scale.set(0.09, 4.4, 0.09);
+      p.position.set(sx * W, 2.2, sz * D);
+      g.add(p);
+    }
+    for (const h of [1.3, 2.7]) {
+      for (const sz of [-1, 1]) {
+        const b = mesh(rbox(W * 2 + 0.3, 0.07, 0.34, 0.03), plank);
+        b.position.set(0, h, sz * D);
+        g.add(b);
+      }
+      for (const sx of [-1, 1]) {
+        const b = mesh(rbox(0.34, 0.07, D * 2 + 0.3, 0.03), plank);
+        b.position.set(sx * W, h, 0);
+        g.add(b);
+      }
+    }
+    // 交叉斜撐
+    for (const sz of [-1, 1]) for (const r of [0.55, -0.55]) {
+      const b = mesh(GEO.cyl, pole);
+      b.scale.set(0.05, 3.3, 0.05);
+      b.rotation.z = r;
+      b.position.set(r > 0 ? -1.6 : 1.6, 1.9, sz * (D + 0.05));
+      g.add(b);
+    }
+    this.scaffold = g;
+    house.obj.add(g);
+  }
+
   // ---------- 房屋 ----------
   setHouseTier(tier: number): void {
     this.houseTier = tier;
@@ -703,9 +752,14 @@ export class World {
     post.position.y = 0.5;
     const box = mesh(rbox(0.36, 0.34, 0.6, 0.14), mat('#4a7fc9', { roughness: 0.4 }));
     box.position.y = 1.12;
+    // 旗子：有新訂單時立起來（以轉軸為中心旋轉）
+    const flagPivot = new THREE.Group();
+    flagPivot.position.set(0.2, 1.12, -0.18);
     const flag = mesh(rbox(0.03, 0.26, 0.14, 0.01), mat('#e84a4a'));
-    flag.position.set(0.2, 1.24, -0.08);
-    g.add(post, box, flag);
+    flag.position.set(0, 0.12, 0.07);
+    flagPivot.add(flag);
+    this.mailFlag = flagPivot;
+    g.add(post, box, flagPivot);
     return g;
   }
 

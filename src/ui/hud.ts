@@ -1,7 +1,5 @@
 import type { HudKey, Layout } from '../config/layout';
-import type { CropDef } from '../data/crops';
 import { MILK_SELL, xpNext } from '../data/economy';
-import type { CowAct, CowMenuItem } from '../systems/ranch';
 import { SEASON_LABEL, type Season } from '../core/clock';
 
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
@@ -16,22 +14,46 @@ export const ITEM_INFO: Record<string, { name: string; emoji: string; price: num
   coin_old: { name: '古錢幣', emoji: '🪙', price: 120 },
   milk: { name: '牛奶', emoji: '🥛', price: MILK_SELL },
   hay: { name: '牧草', emoji: '🌾', price: 2 },
+  wood: { name: '木材', emoji: '🪵', price: 3 },
+  stone: { name: '石材', emoji: '🪨', price: 3 },
+  fert: { name: '有機肥', emoji: '🧪', price: 20 },
 };
+
+// 通用的動作選單項目（牛、堆肥桶、房子共用）
+export interface MenuItem { act: string; emoji: string; label: string; enabled: boolean; note: string }
+export interface MenuView { title: string; sub: string; items: MenuItem[] }
+
+// 工具列格子（種子、有機肥）
+export interface ToolSlot { id: string; emoji: string; name: string; sub: string; selected: boolean; lock: string }
+
+// 訂單卡
+export interface OrderCard {
+  id: string;
+  items: { emoji: string; name: string; have: number; need: number }[];
+  coins: number;
+  xp: number;
+  canDeliver: boolean;
+  done: boolean;
+}
 
 export class Hud {
   root: HTMLElement;
   private els = {} as Record<HudKey, HTMLElement>;
   private toastTimer = 0;
   private hintText = '';
-  onSeed?: (id: string) => void;
+  private toolKey = '';
+  onTool?: (id: string) => void;
   onBag?: () => void;
   onPet?: () => void;
   onMute?: () => void;
   onSell?: () => void;
   onMow?: () => void;
-  onCowAct?: (act: CowAct) => void;
-  private cowMenu!: HTMLElement;
-  cowMenuOpen = false;
+  onMenuAct?: (key: string, act: string) => void;
+  onDeliver?: (id: string) => void;
+  onSkip?: (id: string) => void;
+  private menu!: HTMLElement;
+  menuOpen: string | null = null;
+  ordersOpen = false;
 
   constructor() {
     this.root = document.createElement('div');
@@ -64,16 +86,27 @@ export class Hud {
     $('.pet-btn', this.root).onclick = () => this.onPet?.();
     $('.mute', this.root).onclick = () => this.onMute?.();
     $('.mow-btn', this.root).onclick = () => this.onMow?.();
+    // 工具列：滑鼠滾輪橫向捲動
+    const seeds = $('.seeds', this.root);
+    seeds.addEventListener('wheel', (e) => { seeds.scrollLeft += e.deltaY; e.preventDefault(); }, { passive: false });
 
-    const panel = document.createElement('div');
-    panel.id = 'bag-panel';
-    panel.className = 'panel hidden';
-    panel.innerHTML = `<div class="panel-card"><h3>🎒 背包</h3><div class="items"></div>
-      <div class="panel-actions"><button class="btn sell">全部賣出</button><button class="btn ghost close">關閉</button></div></div>`;
-    document.body.appendChild(panel);
-    $('.close', panel).onclick = () => panel.classList.add('hidden');
-    panel.onclick = (e) => { if (e.target === panel) panel.classList.add('hidden'); };
+    const panel = this.makePanel('bag-panel', `<div class="panel-card"><h3>🎒 背包</h3><div class="items"></div>
+      <div class="panel-actions"><button class="btn sell">全部賣出</button><button class="btn ghost close">關閉</button></div></div>`);
     $('.sell', panel).onclick = () => this.onSell?.();
+
+    const orders = this.makePanel('orders-panel', `<div class="panel-card wide"><h3>📬 訂單板</h3><div class="ord-sub"></div><div class="orders"></div>
+      <div class="panel-actions"><button class="btn ghost close">關閉</button></div></div>`, () => (this.ordersOpen = false));
+    orders.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('button[data-oid]');
+      if (!b || b.classList.contains('off')) return;
+      if (b.dataset.kind === 'deliver') this.onDeliver?.(b.dataset.oid!);
+      else this.onSkip?.(b.dataset.oid!);
+    });
+
+    this.makePanel('confirm-panel', `<div class="panel-card"><h3 class="cf-title"></h3><div class="cf-body"></div>
+      <div class="panel-actions"><button class="btn cf-ok">確定</button><button class="btn ghost close">取消</button></div></div>`);
+    this.makePanel('letter-panel', `<div class="panel-card letter"><div class="lt-body"></div>
+      <div class="panel-actions"><button class="btn lt-ok">好</button></div></div>`);
 
     const lv = document.createElement('div');
     lv.id = 'levelup';
@@ -84,17 +117,30 @@ export class Hud {
     combo.id = 'combo';
     document.body.appendChild(combo);
 
-    this.cowMenu = document.createElement('div');
-    this.cowMenu.id = 'cow-menu';
-    this.cowMenu.className = 'hidden';
-    this.cowMenu.addEventListener('pointerdown', (e) => e.stopPropagation());
-    this.cowMenu.onclick = (e) => {
+    this.menu = document.createElement('div');
+    this.menu.id = 'act-menu';
+    this.menu.className = 'hidden';
+    this.menu.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.menu.onclick = (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('button[data-act]');
-      if (!b || b.classList.contains('off')) return;
-      this.hideCowMenu();
-      this.onCowAct?.(b.dataset.act as CowAct);
+      if (!b || b.classList.contains('off') || !this.menuOpen) return;
+      const key = this.menuOpen;
+      this.hideMenu();
+      this.onMenuAct?.(key, b.dataset.act!);
     };
-    document.body.appendChild(this.cowMenu);
+    document.body.appendChild(this.menu);
+  }
+
+  private makePanel(id: string, html: string, onClose?: () => void): HTMLElement {
+    const p = document.createElement('div');
+    p.id = id;
+    p.className = 'panel hidden';
+    p.innerHTML = html;
+    document.body.appendChild(p);
+    const close = () => { p.classList.add('hidden'); onClose?.(); };
+    p.querySelector<HTMLElement>('.close')?.addEventListener('click', close);
+    p.addEventListener('click', (e) => { if (e.target === p && id !== 'letter-panel') close(); });
+    return p;
   }
 
   el(key: HudKey): HTMLElement { return this.els[key]; }
@@ -139,52 +185,57 @@ export class Hud {
     $('.coin-n', this.root).textContent = Math.floor(coins).toLocaleString();
   }
 
-  // 牛隻照顧選單：跟著牛頭在畫面上的位置
-  showCowMenu(m: { title: string; sub: string; items: CowMenuItem[] }): void {
+  // ---------- 動作選單（跟著物件在畫面上的位置） ----------
+  showMenu(key: string, m: MenuView): void {
     const html = `<div class="cm-title">${m.title}</div><div class="cm-sub">${m.sub}</div>` +
       m.items.map((it) => `<button data-act="${it.act}" class="${it.enabled ? '' : 'off'}"><span class="em">${it.emoji}</span><span class="lb">${it.label}</span><span class="nt">${it.note}</span></button>`).join('');
-    if (this.cowMenu.innerHTML !== html) this.cowMenu.innerHTML = html;
-    if (!this.cowMenuOpen) {
-      this.cowMenu.classList.remove('hidden', 'pop');
-      void this.cowMenu.offsetWidth;
-      this.cowMenu.classList.add('pop');
+    if (this.menu.innerHTML !== html) this.menu.innerHTML = html;
+    if (this.menuOpen !== key) {
+      this.menu.classList.remove('hidden', 'pop');
+      void this.menu.offsetWidth;
+      this.menu.classList.add('pop');
     }
-    this.cowMenuOpen = true;
+    this.menuOpen = key;
   }
 
-  moveCowMenu(x: number, y: number): void {
-    this.cowMenu.style.left = `${Math.max(130, Math.min(window.innerWidth - 130, x))}px`;
-    this.cowMenu.style.top = `${Math.max(200, y)}px`;
+  moveMenu(x: number, y: number): void {
+    this.menu.style.left = `${Math.max(130, Math.min(window.innerWidth - 130, x))}px`;
+    this.menu.style.top = `${Math.max(220, y)}px`;
   }
 
-  hideCowMenu(): void {
-    this.cowMenuOpen = false;
-    this.cowMenu.classList.add('hidden');
+  hideMenu(): void {
+    this.menuOpen = null;
+    this.menu.classList.add('hidden');
   }
 
   setMower(on: boolean): void { $('.mow-btn', this.root).classList.toggle('on', on); }
 
   setMute(m: boolean): void { $('.mute', this.root).textContent = m ? '🔇' : '🔊'; }
 
-  setSeeds(crops: CropDef[], selected: string, level: number, season: Season): void {
+  // ---------- 工具列（種子＋有機肥，可橫向捲動） ----------
+  setTools(slots: ToolSlot[]): void {
     const box = $('.seeds', this.root);
-    if (!box.childElementCount) {
-      crops.forEach((c, i) => {
+    const key = slots.map((s) => s.id).join(',');
+    if (key !== this.toolKey) {
+      this.toolKey = key;
+      box.innerHTML = '';
+      slots.forEach((s, i) => {
         const b = document.createElement('button');
         b.className = 'seed';
-        b.dataset.id = c.id;
-        b.innerHTML = `<span class="em">${c.emoji}</span><span class="nm">${c.name}</span><span class="pr">🪙${c.seed}</span><span class="key">${i + 1}</span><span class="lock"></span>`;
-        b.onclick = () => this.onSeed?.(c.id);
+        b.dataset.id = s.id;
+        b.innerHTML = `<span class="em"></span><span class="nm"></span><span class="pr"></span><span class="key">${i < 9 ? i + 1 : ''}</span><span class="lock"></span>`;
+        b.onclick = () => this.onTool?.(s.id);
         box.appendChild(b);
       });
     }
-    crops.forEach((c) => {
-      const b = box.querySelector<HTMLElement>(`[data-id="${c.id}"]`)!;
-      const lockedLv = level < c.unlock;
-      const offSeason = c.season !== 'all' && c.season !== season;
-      b.classList.toggle('sel', c.id === selected);
-      b.classList.toggle('locked', lockedLv || offSeason);
-      b.querySelector('.lock')!.textContent = lockedLv ? `Lv${c.unlock}` : offSeason ? `${SEASON_LABEL[c.season as Season]}季` : '';
+    slots.forEach((s) => {
+      const b = box.querySelector<HTMLElement>(`[data-id="${s.id}"]`)!;
+      b.querySelector('.em')!.textContent = s.emoji;
+      b.querySelector('.nm')!.textContent = s.name;
+      b.querySelector('.pr')!.textContent = s.sub;
+      b.querySelector('.lock')!.textContent = s.lock;
+      b.classList.toggle('sel', s.selected);
+      b.classList.toggle('locked', !!s.lock);
     });
   }
 
@@ -247,6 +298,47 @@ export class Hud {
   }
 
   closeBag(): void { $('#bag-panel').classList.add('hidden'); }
+
+  // ---------- 訂單板 ----------
+  openOrders(sub: string, cards: OrderCard[]): void {
+    const p = $('#orders-panel');
+    $('.ord-sub', p).textContent = sub;
+    const html = cards.map((c) => `
+      <div class="order ${c.done ? 'done' : ''}">
+        <div class="ord-items">${c.items.map((it) => `<div class="ord-it ${it.have >= it.need ? 'ok' : ''}"><span class="em">${it.emoji}</span><span class="nm">${it.name}</span><span class="ct">${Math.min(it.have, it.need)}/${it.need}</span></div>`).join('')}</div>
+        <div class="ord-reward">🪙${c.coins}　✨${c.xp} XP</div>
+        ${c.done ? '<div class="stamp">完成</div>' : `<div class="ord-btns"><button class="btn ${c.canDeliver ? '' : 'off'}" data-oid="${c.id}" data-kind="deliver">交貨</button><button class="btn ghost small" data-oid="${c.id}" data-kind="skip">換一張</button></div>`}
+      </div>`).join('');
+    const box = $('.orders', p);
+    if (box.innerHTML !== html) box.innerHTML = html;
+    p.classList.remove('hidden');
+    this.ordersOpen = true;
+  }
+
+  closeOrders(): void { $('#orders-panel').classList.add('hidden'); this.ordersOpen = false; }
+
+  // ---------- 確認視窗、信件 ----------
+  confirm(title: string, body: string, ok = '確定'): Promise<boolean> {
+    const p = $('#confirm-panel');
+    $('.cf-title', p).textContent = title;
+    $('.cf-body', p).innerHTML = body;
+    $('.cf-ok', p).textContent = ok;
+    p.classList.remove('hidden');
+    return new Promise((resolve) => {
+      const done = (v: boolean) => { p.classList.add('hidden'); okBtn.onclick = null; cancel.onclick = null; resolve(v); };
+      const okBtn = $('.cf-ok', p), cancel = $('.close', p);
+      okBtn.onclick = () => done(true);
+      cancel.onclick = () => done(false);
+    });
+  }
+
+  letter(html: string, ok: string): Promise<void> {
+    const p = $('#letter-panel');
+    $('.lt-body', p).innerHTML = html;
+    $('.lt-ok', p).textContent = ok;
+    p.classList.remove('hidden');
+    return new Promise((resolve) => { $('.lt-ok', p).onclick = () => { p.classList.add('hidden'); resolve(); }; });
+  }
 
   levelUp(level: number, unlocks: string[]): void {
     const el = $('#levelup');

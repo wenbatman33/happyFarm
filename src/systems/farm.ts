@@ -2,16 +2,28 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { PropPlacement } from '../config/layout';
 import { CROP_BY_ID, type CropDef } from '../data/crops';
-import { plotsForLevel, rollQuality, type Quality } from '../data/economy';
+import { plotPrice, plotsForLevel, rollQuality, type Quality } from '../data/economy';
 import { easeOutBack } from '../core/rng';
 import { buildCrop } from '../world/crops3d';
 import { GEO, mat, mesh } from '../world/materials';
 import type { GameState, PlotSave } from './state';
 
-export const FIELD_COLS = 4;
-export const FIELD_ROWS = 3;
-// 解鎖順序：先左邊 3×2，再第三排，最後第四欄
-const UNLOCK_ORDER = [0, 1, 2, 4, 5, 6, 8, 9, 10, 3, 7, 11];
+export const FIELD_COLS = 6;
+export const FIELD_ROWS = 5;
+export const FIELD_COUNT = FIELD_COLS * FIELD_ROWS;
+
+// 解鎖順序：田區從左上角一圈圈長大（3×2 → 3×3 → 4×3 → 4×4 → 5×4 → 5×5 → 6×5）
+export const UNLOCK_ORDER: number[] = (() => {
+  const out: number[] = [];
+  for (const [c, r] of [[3, 2], [3, 3], [4, 3], [4, 4], [5, 4], [5, 5], [6, 5]]) {
+    for (let row = 0; row < r; row++) for (let col = 0; col < c; col++) {
+      const i = row * FIELD_COLS + col;
+      if (!out.includes(i)) out.push(i);
+    }
+  }
+  return out;
+})();
+export const STARTER_PLOTS = 6;
 
 const DRY_RATE = 0.6;
 const soilGeo = new RoundedBoxGeometry(0.92, 0.16, 0.92, 2, 0.06);
@@ -23,16 +35,45 @@ const MAT = {
   furrow: mat('#6e4428', { roughness: 1 }),
   furrowWet: mat('#43291a', { roughness: 0.5 }),
   plot: mat('#b3cf72', { roughness: 0.95 }),
+  sale: mat('#c9d98a', { roughness: 0.95 }),
   locked: mat('#a4ad8c', { roughness: 0.95 }),
   sign: mat('#c89b62'),
+  fert: mat('#f2c94c', { emissive: '#e0a020', emissiveIntensity: 0.6, roughness: 0.4 }),
   ring: new THREE.MeshBasicMaterial({ color: '#fff6c8', transparent: true, opacity: 0.85, depthWrite: false }),
 };
+
+// 田地上方的小標籤（等級、價格）
+const labelTex = new Map<string, THREE.Texture>();
+function labelTexture(text: string, bg: string): THREE.Texture {
+  const key = text + bg;
+  let t = labelTex.get(key);
+  if (t) return t;
+  const cv = document.createElement('canvas');
+  cv.width = 160; cv.height = 64;
+  const c = cv.getContext('2d')!;
+  c.fillStyle = bg;
+  c.beginPath();
+  c.roundRect(4, 6, 152, 52, 26);
+  c.fill();
+  c.fillStyle = '#fff';
+  c.font = 'bold 30px "Baloo 2","PingFang TC","Noto Sans TC",sans-serif';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.fillText(text, 80, 34);
+  t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  labelTex.set(key, t);
+  return t;
+}
 
 interface PlotView {
   group: THREE.Group;
   grass: THREE.Mesh;
   soil: THREE.Group;
   sign: THREE.Group;
+  label: THREE.Sprite;
+  labelKey: string;
+  fert: THREE.Group;
   crop: THREE.Group | null;
   stage: number;
   cropId: string | null;
@@ -41,20 +82,21 @@ interface PlotView {
   wet: boolean;
 }
 
-export type PlotStatus = 'locked' | 'grass' | 'tilled' | 'growing' | 'dry' | 'mature';
+export type PlotStatus = 'locked' | 'debris' | 'forsale' | 'grass' | 'tilled' | 'growing' | 'dry' | 'mature';
 
 export class Farm {
   root = new THREE.Group();
   private views: PlotView[] = [];
   queued = new Set<number>();
+  hasDebris: (i: number) => boolean = () => false;
 
   constructor(parent: THREE.Object3D, private state: GameState, private place: PropPlacement) {
     parent.add(this.root);
-    for (let i = 0; i < FIELD_COLS * FIELD_ROWS; i++) this.views.push(this.makeView());
+    for (let i = 0; i < FIELD_COUNT; i++) this.views.push(this.makeView());
     this.reposition();
   }
 
-  get count(): number { return FIELD_COLS * FIELD_ROWS; }
+  get count(): number { return FIELD_COUNT; }
 
   tileOf(i: number): { x: number; z: number } {
     return { x: this.place.x + (i % FIELD_COLS), z: this.place.z + Math.floor(i / FIELD_COLS) };
@@ -66,12 +108,17 @@ export class Farm {
     return r * FIELD_COLS + c;
   }
 
-  isUnlocked(i: number): boolean {
-    return UNLOCK_ORDER.indexOf(i) < plotsForLevel(this.state.data.level);
-  }
+  rank(i: number): number { return UNLOCK_ORDER.indexOf(i); }
+  owned(i: number): boolean { return this.plot(i).owned; }
+  get ownedCount(): number { return this.state.data.plots.filter((p) => p.owned).length; }
+  // 目前等級可以擁有幾塊
+  canOwn(i: number): boolean { return this.rank(i) < plotsForLevel(this.state.data.level); }
+  nextPrice(): number { return plotPrice(this.ownedCount + 1); }
+  // 還可以買幾塊（等級上限內、尚未擁有）
+  get buyable(): number { return this.state.data.plots.filter((p, i) => !p.owned && this.canOwn(i)).length; }
 
   unlockLevel(i: number): number {
-    const rank = UNLOCK_ORDER.indexOf(i);
+    const rank = this.rank(i);
     for (let lv = 1; lv < 100; lv++) if (plotsForLevel(lv) > rank) return lv;
     return 99;
   }
@@ -89,6 +136,15 @@ export class Farm {
       f.position.set(0, 0.145, k * 0.25);
       soil.add(f);
     }
+    // 施過肥：土上撒一點金色顆粒
+    const fert = new THREE.Group();
+    for (let k = 0; k < 7; k++) {
+      const d = mesh(GEO.sphereLo, MAT.fert, false);
+      d.scale.setScalar(0.045);
+      d.position.set(Math.cos(k * 2.4) * 0.3, 0.16, Math.sin(k * 2.4) * 0.3);
+      fert.add(d);
+    }
+    fert.visible = false;
     const sign = new THREE.Group();
     const post = mesh(GEO.cyl, MAT.sign);
     post.scale.set(0.05, 0.4, 0.05);
@@ -96,13 +152,17 @@ export class Farm {
     const board = mesh(new RoundedBoxGeometry(0.34, 0.22, 0.04, 1, 0.02), MAT.sign);
     board.position.y = 0.42;
     sign.add(post, board);
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ depthWrite: false }));
+    label.scale.set(0.62, 0.25, 1);
+    label.position.set(0, 0.78, 0);
+    label.visible = false;
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.48, 28), MAT.ring);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.2;
     ring.visible = false;
-    group.add(grass, soil, sign, ring);
+    group.add(grass, soil, fert, sign, label, ring);
     this.root.add(group);
-    return { group, grass, soil, sign, crop: null, stage: -1, cropId: null, pop: 1, ring, wet: false };
+    return { group, grass, soil, sign, label, labelKey: '', fert, crop: null, stage: -1, cropId: null, pop: 1, ring, wet: false };
   }
 
   reposition(): void {
@@ -135,13 +195,18 @@ export class Farm {
   }
 
   status(i: number, now: number): PlotStatus {
-    if (!this.isUnlocked(i)) return 'locked';
     const p = this.plot(i);
+    if (!p.owned) {
+      if (!this.canOwn(i)) return 'locked';
+      return this.hasDebris(i) ? 'debris' : 'forsale';
+    }
     if (!p.tilled) return 'grass';
     if (!p.cropId) return 'tilled';
     if (this.progress(i, now) >= 1) return 'mature';
     return p.wetUntil > now ? 'growing' : 'dry';
   }
+
+  buy(i: number): void { this.plot(i).owned = true; }
 
   hoe(i: number, now: number): void {
     const p = this.plot(i);
@@ -157,7 +222,10 @@ export class Farm {
     p.p0 = 0;
     p.snapAt = now;
     p.wetUntil = 0;
+    p.fert = false;
   }
+
+  fertilize(i: number): void { this.plot(i).fert = true; }
 
   water(i: number, now: number): void {
     const p = this.plot(i);
@@ -173,11 +241,13 @@ export class Farm {
     const d = this.def(i);
     if (!d || this.progress(i, now) < 1) return null;
     const p = this.plot(i);
+    const quality = rollQuality(Math.random(), true, p.fert);
     p.cropId = null;
     p.p0 = 0;
     p.snapAt = now;
     p.wetUntil = 0;
-    return { def: d, quality: rollQuality(Math.random(), true) };
+    p.fert = false;
+    return { def: d, quality };
   }
 
   worldPos(i: number, y = 0.3): THREE.Vector3 {
@@ -187,14 +257,28 @@ export class Farm {
 
   update(dt: number, now: number, raining: boolean): void {
     const t = performance.now() / 1000;
+    const price = this.nextPrice();
     this.views.forEach((v, i) => {
       const p = this.plot(i);
-      const unlocked = this.isUnlocked(i);
-      if (raining && unlocked && p.cropId && p.wetUntil < now + 30000) this.water(i, now);
-      v.sign.visible = !unlocked;
-      v.grass.material = unlocked ? MAT.plot : MAT.locked;
-      v.grass.visible = !p.tilled || !unlocked;
-      v.soil.visible = p.tilled && unlocked;
+      const st = this.status(i, now);
+      const own = p.owned;
+      if (raining && own && p.cropId && p.wetUntil < now + 30000) this.water(i, now);
+      v.sign.visible = st === 'locked' || st === 'forsale';
+      v.grass.material = own ? MAT.plot : st === 'locked' ? MAT.locked : MAT.sale;
+      v.grass.visible = !p.tilled || !own;
+      v.soil.visible = p.tilled && own;
+      v.fert.visible = own && p.fert && !!p.cropId;
+      // 標籤：未解鎖顯示等級、可購買顯示價格
+      const key = st === 'locked' ? `Lv${this.unlockLevel(i)}` : st === 'forsale' ? `🪙${price}` : '';
+      if (key !== v.labelKey) {
+        v.labelKey = key;
+        v.label.visible = !!key;
+        if (key) {
+          (v.label.material as THREE.SpriteMaterial).map = labelTexture(key, st === 'locked' ? 'rgba(74,53,38,0.72)' : 'rgba(214,150,40,0.92)');
+          (v.label.material as THREE.SpriteMaterial).needsUpdate = true;
+        }
+      }
+      if (st === 'forsale') v.label.position.y = 0.78 + Math.sin(t * 2.5 + i) * 0.04;
       const wet = p.tilled && p.wetUntil > now;
       if (wet !== v.wet) {
         v.wet = wet;
@@ -203,7 +287,7 @@ export class Farm {
       v.ring.visible = this.queued.has(i);
       if (v.ring.visible) v.ring.scale.setScalar(1 + Math.sin(t * 6) * 0.05);
 
-      const d = this.def(i);
+      const d = own ? this.def(i) : null;
       const stage = d ? this.stageOf(this.progress(i, now)) : -1;
       if (stage !== v.stage || (d?.id ?? null) !== v.cropId) {
         if (v.crop) v.group.remove(v.crop);

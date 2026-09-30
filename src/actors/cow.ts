@@ -3,6 +3,7 @@ import { GEO, mat, mesh, withRim } from '../world/materials';
 import type { Grid } from '../world/grid';
 import { Mover } from './mover';
 import { clamp, lerp } from '../core/rng';
+import { bubbleTexture } from '../world/bubble';
 
 // 乳牛「花花」：M0 程式建模佔位版
 export type CowAnim = 'idle' | 'walk' | 'graze' | 'eat' | 'happy' | 'brushed' | 'milked' | 'sleep';
@@ -18,29 +19,6 @@ export interface CowContext {
 }
 
 const rim = (c: string) => withRim(mat(c, { roughness: 0.7 }), 0.14);
-
-// 頭上的需求泡泡（emoji 貼圖快取）
-const bubbleTex = new Map<string, THREE.Texture>();
-function bubbleTexture(emoji: string): THREE.Texture {
-  let t = bubbleTex.get(emoji);
-  if (t) return t;
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 128;
-  const c = cv.getContext('2d')!;
-  c.fillStyle = 'rgba(0,0,0,0.12)';
-  c.beginPath(); c.arc(66, 62, 50, 0, Math.PI * 2); c.fill();
-  c.fillStyle = '#fffaf0';
-  c.beginPath(); c.arc(64, 58, 50, 0, Math.PI * 2); c.fill();
-  c.beginPath(); c.moveTo(52, 100); c.lineTo(64, 124); c.lineTo(76, 100); c.fill();
-  c.font = '60px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-  c.textAlign = 'center';
-  c.textBaseline = 'middle';
-  c.fillText(emoji, 64, 62);
-  t = new THREE.CanvasTexture(cv);
-  t.colorSpace = THREE.SRGBColorSpace;
-  bubbleTex.set(emoji, t);
-  return t;
-}
 
 export class Cow {
   root = new THREE.Group();

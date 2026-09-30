@@ -22,6 +22,28 @@ export const plotsForLevel = (level: number): number => {
   for (const [lv, count] of PLOT_TABLE) if (level >= lv) n = count;
   return n;
 };
+// 第 n 塊地的價格（06 §6.1）
+export const plotPrice = (n: number): number => Math.round((150 * Math.pow(1.085, n - 6)) / 10) * 10;
+
+// 荒地障礙物：清除需要的次數與產出
+export type DebrisKind = 'stone' | 'boulder' | 'stump' | 'log';
+export const DEBRIS: Record<DebrisKind, { hits: number; item: 'stone' | 'wood'; n: number; tool: 'pick' | 'axe'; name: string; xp: number }> = {
+  stone: { hits: 1, item: 'stone', n: 1, tool: 'pick', name: '小石頭', xp: 5 },
+  boulder: { hits: 3, item: 'stone', n: 4, tool: 'pick', name: '大石頭', xp: 12 },
+  stump: { hits: 3, item: 'wood', n: 4, tool: 'axe', name: '樹樁', xp: 10 },
+  log: { hits: 4, item: 'wood', n: 6, tool: 'axe', name: '倒木', xp: 14 },
+};
+export const DEBRIS_WILD_CAP = 12; // 田地以外的荒地障礙物上限
+export const DEBRIS_DAILY = 2; // 每天重生幾個
+
+// 堆肥：雜草 10 → 有機肥 1，發酵 2 小時，最多同時 3 批
+export const COMPOST_WEEDS = 10;
+export const COMPOST_MS = 2 * 3600000;
+export const COMPOST_SLOTS = 3;
+
+// 房屋修繕 T2（03 §2）
+export const HOUSE_T2 = { level: 8, coins: 3000, wood: 20, ms: 3600000 };
+
 export const nextPlotUnlockLevel = (level: number): number | null => {
   for (const [lv] of PLOT_TABLE) if (lv > level) return lv;
   return null;
@@ -32,10 +54,10 @@ export type Quality = 'normal' | 'good' | 'gold';
 export const QUALITY_MULT: Record<Quality, number> = { normal: 1, good: 1.25, gold: 1.6 };
 export const QUALITY_LABEL: Record<Quality, string> = { normal: '', good: '優良', gold: '金星' };
 
-export function rollQuality(rand: number, noWeeds: boolean): Quality {
-  // 基礎 85/12/3；田上沒雜草 80/17/3（見 06 §5）
-  const gold = 0.03;
-  const good = noWeeds ? 0.17 : 0.12;
+export function rollQuality(rand: number, noWeeds: boolean, fert = false): Quality {
+  // 基礎 85/12/3；田上沒雜草 80/17/3；施有機肥 58/32/10（見 06 §5）
+  const gold = fert ? 0.1 : 0.03;
+  const good = fert ? 0.32 : noWeeds ? 0.17 : 0.12;
   if (rand < gold) return 'gold';
   if (rand < gold + good) return 'good';
   return 'normal';
