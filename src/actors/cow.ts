@@ -271,7 +271,7 @@ export class Cow {
     this.mover.update(dt);
     if (wasMoving) {
       this.bellT -= dt;
-      if (this.bellT <= 0) { this.bellT = 1.1; ctx.onBell(); }
+      if (this.bellT <= 0) { this.bellT = 2.2 + Math.random() * 1.6; ctx.onBell(); } // 偶爾叮一下就好
     }
 
     // ---- 動畫 ----

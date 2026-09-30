@@ -4,6 +4,7 @@ import { dayKey } from '../core/clock';
 import { sfx } from '../core/audio';
 import { COW_BRUSH_DAILY, COW_HUNGRY_MS, MILK_REGEN_MS, MILK_XP, QUALITY_LABEL, cowHearts, type Quality } from '../data/economy';
 import { GEO, mat, mesh } from '../world/materials';
+import { clamp } from '../core/rng';
 import type { Game } from '../game';
 import type { CowSave } from './state';
 
@@ -259,14 +260,19 @@ export class Ranch {
         cb();
       }
     }
+    // 牛的聲音依與主角的距離調整：3 公尺內最大聲，約 13 公尺外聽不到
+    const vol = () => {
+      const a = this.cow.root.position, b = g.player.root.position;
+      return Math.pow(clamp(1 - (Math.hypot(a.x - b.x, a.z - b.z) - 3) / 10, 0, 1), 2);
+    };
     this.cow.update(dt, {
       night,
       bounds: g.world.ranchBounds,
       sleepSpot: g.world.cowSleepSpot,
       hungry,
       onGraze: (x, z) => g.world.mowGrass(x, z, 0.35, now),
-      onMoo: (happy) => sfx.moo(happy),
-      onBell: () => sfx.bell(),
+      onMoo: (happy) => sfx.moo(happy, vol()),
+      onBell: () => sfx.bell(vol()),
     });
   }
 }
