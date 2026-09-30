@@ -1,0 +1,17 @@
+{
+  "name": "暖暖農場",
+  "short_name": "暖暖農場",
+  "description": "和寵物一起種田、除草、蓋房子的 3D 療癒農場",
+  "lang": "zh-Hant",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#9fd07a",
+  "theme_color": "#8fd16a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

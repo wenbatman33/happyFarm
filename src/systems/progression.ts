@@ -42,11 +42,13 @@ export class Progression {
       }
     }
     this.achT = 0.5;
+    this.game.festival?.onEv(ev, n);
   }
 
   // 圖鑑紀錄：key 可帶品質（例如 carrot:gold）
   record(key: string): void {
     const [id, q] = key.split(':');
+    this.game.festival?.onItem(id);
     if (!ALMANAC.some((e) => e.id === id)) return;
     const a = this.p.almanac;
     const isNew = !a[id];

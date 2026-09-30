@@ -38,6 +38,15 @@ import { HOUSE_TIERS } from './data/economy';
 import { Models, loadModels } from './world/models';
 import { Ranch, type CowAct } from './systems/ranch';
 import { ScreenFx } from './ui/fx';
+import { Tools } from './systems/tools';
+import { Interior } from './systems/interior';
+import { Festival } from './systems/festival';
+import { Calendar } from './systems/calendar';
+import { Social } from './systems/social';
+import { Greenhouse } from './systems/greenhouse';
+import { Music } from './core/music';
+import { SettingsPanel } from './ui/settings';
+import { MONTH_THEME, TOOLS } from './data/economy';
 
 export type Target =
   | { kind: 'plot'; i: number }
@@ -107,6 +116,15 @@ export class Game {
   orchard: Orchard;
   workshop: Workshop;
   workshopPanel = new WorkshopPanel();
+  tools: Tools;
+  interior: Interior;
+  festival: Festival;
+  calendar: Calendar;
+  social: Social;
+  greenhouse: Greenhouse;
+  music = new Music();
+  settings: SettingsPanel;
+  private fadeEl: HTMLElement;
   private pokeT = 0;
   onboarding = false;
   particles: Particles;
@@ -145,7 +163,7 @@ export class Game {
     const d = this.state.data;
     this.stage = new Stage(container, this.layout.camera);
     this.world = new World(this.stage.scene, this.grid, this.sceneLayout);
-    this.farm = new Farm(this.world.root, this.state, this.sceneLayout.field);
+    this.farm = new Farm(this.world.root, this.state, this.sceneLayout.field, this.sceneLayout.greenhouse);
     this.weeds = new Weeds(this.world.root, this.state, this.grid, this.sceneLayout, this.farm);
     this.debris = new Debris(this.world.root, this.state, this.grid, this.farm, this.sceneLayout);
     this.farm.hasDebris = (i) => this.debris.onPlot(i);
@@ -167,6 +185,14 @@ export class Game {
     this.progression = new Progression(this);
     this.orchard = new Orchard(this);
     this.workshop = new Workshop(this);
+    this.tools = new Tools(this);
+    this.interior = new Interior(this);
+    this.festival = new Festival(this);
+    this.calendar = new Calendar(this);
+    this.social = new Social(this);
+    this.greenhouse = new Greenhouse(this);
+    this.settings = new SettingsPanel(this);
+    this.fadeEl = document.getElementById('fade')!;
     const L = this.sceneLayout;
     const bubbleAt = (x: number, z: number, y: number) => { const g = new THREE.Group(); g.position.set(x, 0, z); this.world.root.add(g); return new Bubble(g, y); };
     this.bubbles = { mail: bubbleAt(L.mailbox.x, L.mailbox.z, 1.85), compost: bubbleAt(L.compost.x, L.compost.z, 1.45), house: bubbleAt(L.house.x, L.house.z + 1, 5.6), workshop: bubbleAt(L.workshop.x, L.workshop.z, 3.6) };
@@ -180,6 +206,9 @@ export class Game {
     this.world.applySeason(this.season);
     if (d.house.tier !== 1) this.world.setHouseTier(d.house.tier);
     if (d.house.buildUntil) this.world.setScaffold(true);
+    this.world.setGreenhouse(d.greenhouse.level, !!d.greenhouse.buildUntil);
+    if (d.petHat) this.pet.setFestiveHat(d.petHat);
+    this.settings.apply();
     const occupied = (x: number, z: number) => !!this.weeds.at(x, z) || d.treasure.spots.some((t) => t.x === x && t.z === z);
     if (this.state.isNew || (!d.debris.length && !d.debrisDay)) this.debris.seedInitial(now, occupied);
     else this.debris.daily(now, occupied);
@@ -193,6 +222,9 @@ export class Game {
       const born = this.weeds.tick(now, this.season);
       if (born.length) window.setTimeout(() => this.hud.toast(`你不在的時候，長了 ${born.length} 株雜草 🌿`, 3200), 900);
     }
+    const robotDid = this.tools.catchUp(now);
+    if (robotDid) window.setTimeout(() => this.hud.toast(`🤖 除草小機器人在你不在時清了 ${robotDid} 株草`, 3000), 5200);
+    this.calendar.welcomeBack(now, this.state.offlineHours);
     if (this.state.rewound) window.setTimeout(() => this.hud.toast('⏰ 偵測到時間被調回，作物會等現實時間追上', 4000), 1500);
     else if (d.rested > 0 && this.state.offlineHours >= 1) window.setTimeout(() => this.hud.toast('✨ 休息加成：收成 XP ×2', 2600), 4200);
 
@@ -230,6 +262,17 @@ export class Game {
     this.hud.onMenuAct = (key, act) => this.onMenuAct(key, act);
     this.hud.onDeliver = (id) => this.deliverOrder(id);
     this.hud.onJournal = () => this.openJournal();
+    this.hud.onFriends = () => { if (this.social.visiting) return; void this.social.open(); };
+    this.hud.onSettings = () => this.settings.open();
+    this.journal.onAction = (a) => {
+      if (a.startsWith('stamp:')) this.calendar.claimStamp(Number(a.slice(6)));
+      else if (a.startsWith('read:')) this.calendar.reread(Number(a.slice(5)));
+      this.journal.onRender?.();
+    };
+    this.journal.extra = {
+      stamps: { label: '📅 印章', render: () => this.calendar.stampTab(this.state.now()) },
+      story: { label: '📜 故事', render: () => this.calendar.storyTab(this.state.now()) },
+    };
     this.journal.onRender = () => this.journal.render(this.state.data, this.season, this.state.now());
     this.journal.onClaimTask = (id) => { this.progression.claimTask(id); this.journal.onRender?.(); };
     this.journal.onClaimTier = (i) => { this.progression.claimTier(i); this.journal.onRender?.(); };
@@ -258,8 +301,49 @@ export class Game {
     window.addEventListener('keyup', (e) => this.onKey(e, false));
     window.addEventListener('blur', () => this.keys.clear());
     window.addEventListener('resize', () => this.applyLayout());
-    document.addEventListener('visibilitychange', () => { if (document.hidden) this.state.save(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { this.state.save(); this.onHidden(); } else this.onVisible(); });
     window.addEventListener('pagehide', () => this.state.save());
+  }
+
+  // ---------- PWA：圖示未讀數字、作物成熟通知 ----------
+  private notifyTimer = 0;
+
+  private readyCount(now: number): number {
+    const d = this.state.data;
+    let n = 0;
+    for (let i = 0; i < this.farm.count; i++) if (this.farm.owned(i) && this.farm.status(i, now) === 'mature') n++;
+    n += d.compost.filter((t) => t <= now).length;
+    n += d.workshop.filter((w) => w.doneAt <= now).length;
+    return n;
+  }
+
+  private onHidden() {
+    const now = this.state.now();
+    const nav = navigator as Navigator & { setAppBadge?: (n: number) => Promise<void> };
+    void nav.setAppBadge?.(this.readyCount(now)).catch(() => {});
+    if (!this.state.data.settings.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
+    // 找最快成熟的田，時間到了通知（分頁要開著，只是在背景）
+    let soon = Infinity;
+    for (let i = 0; i < this.farm.count; i++) {
+      const c = this.farm.def(i);
+      if (!c || !this.farm.owned(i) || this.farm.status(i, now) === 'mature' || c.night) continue;
+      soon = Math.min(soon, (1 - this.farm.progress(i, now)) * this.farm.growMs(i, c));
+    }
+    if (!isFinite(soon)) return;
+    window.clearTimeout(this.notifyTimer);
+    this.notifyTimer = window.setTimeout(() => {
+      const body = `${this.pet.name}在田邊等你收成了 🌾`;
+      void navigator.serviceWorker?.getRegistration().then((r) => {
+        if (r) void r.showNotification('暖暖農場：作物成熟了！', { body, icon: './icons/icon-192.png', tag: 'ripe' });
+        else new Notification('暖暖農場：作物成熟了！', { body });
+      }).catch(() => {});
+    }, Math.max(60000, soon));
+  }
+
+  private onVisible() {
+    window.clearTimeout(this.notifyTimer);
+    const nav = navigator as Navigator & { clearAppBadge?: () => Promise<void> };
+    void nav.clearAppBadge?.().catch(() => {});
   }
 
   // 套用 Blender GLB 模型（沒有檔案時維持程式建模）
@@ -276,7 +360,7 @@ export class Game {
   }
 
   // 不同物種的叫聲
-  private petVoice(species: Species = this.pet.species) {
+  petVoice(species: Species = this.pet.species): void {
     if (species === 'corgi') sfx.woof();
     else if (species === 'cat') sfx.meow();
     else if (species === 'duck') sfx.quack();
@@ -415,28 +499,40 @@ export class Game {
   }
 
   private onKey(e: KeyboardEvent, down: boolean) {
-    if ((e.target as HTMLElement)?.closest?.('.lil-gui, .creator, .petpick')) return;
+    if ((e.target as HTMLElement)?.closest?.('.lil-gui, .creator, .petpick, input, textarea')) return;
     const k = e.key.toLowerCase();
     if (!down) { this.keys.delete(k); return; }
     sfx.unlock();
     this.keys.add(k);
     if (e.repeat) return;
+    if (this.interior.active && this.interior.key(k)) return;
+    if (k === 'escape' && this.social.visiting) { void this.social.leave(); return; }
+    if (k === 'f' && !this.interior.active && !this.social.visiting) void this.social.open();
     if (k === 'q') this.stage.yawGoal += Math.PI / 2;
     if (k === 'e') this.stage.yawGoal -= Math.PI / 2;
     if (k >= '1' && k <= '9') { const s = this.toolSlots[Number(k) - 1]; if (s) this.selectTool(s.id); }
-    if (k === ' ') { if (!this.mower.active) this.interactNearest(); e.preventDefault(); }
+    if (k === ' ') { if (!this.mower.active && !this.interior.active && !this.social.visiting) this.interactNearest(); e.preventDefault(); }
     if (k === 'b') this.openBag();
     if (k === 'j') this.openJournal();
     if (k === 'm') this.hud.onMute?.();
-    if (k === 'r') this.toggleMower();
+    if (k === 'r' && !this.interior.active && !this.social.visiting) this.toggleMower();
     if (k === 'escape' && this.mower.active) this.toggleMower(false);
-    if (k === 'escape') { this.hud.hideMenu(); this.hud.closeOrders(); this.journal.close(); this.workshopPanel.close(); }
+    if (k === 'escape') { this.hud.hideMenu(); this.hud.closeOrders(); this.journal.close(); this.workshopPanel.close(); for (const sh of [this.tools.sheet, this.interior.shop, this.festival.sheet, this.calendar.market, this.social.sheet, this.settings.sheet]) sh.close(); }
   }
 
   private onDown(e: PointerEvent) {
     sfx.unlock();
     if (this.inputBlocked || this.onboarding) return;
     if (this.hud.menuOpen) this.hud.hideMenu();
+    if (this.interior.active) { this.interior.pointerDown(e.clientX, e.clientY); return; }
+    if (this.social.visiting) {
+      const hit = this.groundAt(e.clientX, e.clientY);
+      this.ray.setFromCamera(new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1), this.stage.camera);
+      const vp = this.social.visiting.pet.root;
+      const petHit = this.ray.intersectObject(vp, true).length > 0 || (!!hit && Math.hypot(hit.x - vp.position.x, hit.z - vp.position.z) < 0.55);
+      this.social.pointerDown(hit ? new THREE.Vector3(hit.x, 0, hit.z) : null, petHit);
+      return;
+    }
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     if (this.pointers.size === 2) {
@@ -459,6 +555,7 @@ export class Game {
   }
 
   private onMove(e: PointerEvent) {
+    if (this.interior.active) this.interior.pointerMove(e.clientX, e.clientY);
     if (!this.pointers.has(e.pointerId)) return;
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (this.pinch && this.pointers.size === 2) {
@@ -470,7 +567,7 @@ export class Game {
       this.pinch = { d, a: ang };
       return;
     }
-    if (!this.dragging) return;
+    if (!this.dragging || this.interior.active || this.social.visiting) return;
     if (this.mower.active) { this.mower.holdTarget = this.groundAt(e.clientX, e.clientY); return; }
     // 拖曳：經過的田地、雜草都排進佇列
     const t = this.pick(e.clientX, e.clientY, true);
@@ -541,7 +638,7 @@ export class Game {
         let o: THREE.Object3D | null = props[0].object;
         while (o && !o.userData.kind) o = o.parent;
         const k = o?.userData.kind as string | undefined;
-        if (k === 'house' || k === 'compost') return { kind: 'menu', key: k };
+        if (k === 'house' || k === 'compost' || k === 'greenhouse' || k === 'market') return { kind: 'menu', key: k };
         if (k === 'workshop') return { kind: 'workshop' };
         if (k === 'mailbox') return { kind: 'orders' };
         if (k) return { kind: 'prop', key: k };
@@ -712,6 +809,7 @@ export class Game {
     if (key === 'cow') return this.ranch.menu(now);
     if (key === 'compost') return this.compostMenu(now);
     if (key.startsWith('tree:')) return this.orchard.menu(Number(key.slice(5)), now);
+    if (key === 'greenhouse') return this.greenhouse.menu(now);
     return this.houseMenu(now);
   }
 
@@ -720,10 +818,12 @@ export class Game {
     if (key === 'cow') return this.ranch.cow.root.position.clone().setY(2.3);
     if (key === 'compost') return new THREE.Vector3(L.compost.x, 1.3, L.compost.z);
     if (key.startsWith('tree:')) { const p = this.orchard.pos(Number(key.slice(5))); return new THREE.Vector3(p.x, 2.4, p.z); }
-    return new THREE.Vector3(L.house.x, 4.2, L.house.z + 2);
+    if (key === 'greenhouse') return this.greenhouse.anchor();
+    return new THREE.Vector3(L.house.x, this.state.data.house.tier >= 4 ? 5.6 : 4.2, L.house.z + 2);
   }
 
   private openMenu(key: string) {
+    if (key === 'market') { this.calendar.openMarket(); return; }
     if (key === 'cow' && !RANCH_DEMO && this.state.data.level < RANCH_LEVEL) { this.hud.toast(`🐄 牧場在 Lv${RANCH_LEVEL} 開放`); return; }
     sfx.ui();
     this.hud.showMenu(key, this.menuView(key, this.state.now()));
@@ -741,6 +841,10 @@ export class Game {
     else if (key === 'compost') this.enqueue({ kind: 'compost', act: act as 'add' | 'collect' });
     else if (key === 'house' && act === 'repair') void this.startRepair();
     else if (key === 'house' && act === 'wardrobe') void this.openWardrobe();
+    else if (key === 'house' && act === 'enter') void this.interior.enter();
+    else if (key === 'house' && act === 'tools') this.tools.open();
+    else if (key === 'house' && act === 'shop') this.interior.openShop();
+    else if (key === 'greenhouse') this.greenhouse.onAct(act);
     else if (key.startsWith('tree:')) this.enqueue({ kind: 'tree', slot: Number(key.slice(5)), act });
   }
 
@@ -805,16 +909,21 @@ export class Game {
     if (next && !building) {
       const stone = d.inventory.stone ?? 0;
       const lack: string[] = [];
+      const crafted = this.craftedCount(), parts = d.inventory.windpart ?? 0;
       if (d.level < next.level) lack.push(`Lv${next.level} 解鎖`);
       else {
-        if (d.coins < next.coins) lack.push(`🪙${d.coins}/${next.coins}`);
+        if (d.coins < next.coins) lack.push(`🪙${d.coins.toLocaleString()}/${next.coins.toLocaleString()}`);
         if (wood < next.wood) lack.push(`🪵${wood}/${next.wood}`);
         if (stone < next.stone) lack.push(`🪨${stone}/${next.stone}`);
+        if (next.crafted && crafted < next.crafted) lack.push(`🍞${crafted}/${next.crafted}`);
+        if (next.parts && parts < next.parts) lack.push(`⚙️${parts}/${next.parts}`);
       }
-      items.push({ act: 'repair', emoji: '🔨', label: h.tier === 1 ? '修繕房屋' : `擴建成${next.name}`, enabled: !lack.length, note: lack.length ? lack.join(' ') : `🪙${next.coins} 🪵${next.wood}${next.stone ? ` 🪨${next.stone}` : ''}` });
+      items.push({ act: 'repair', emoji: '🔨', label: h.tier === 1 ? '修繕房屋' : `擴建成${next.name}`, enabled: !lack.length, note: lack.length ? lack.join(' ') : `🪙${next.coins.toLocaleString()} 🪵${next.wood}${next.stone ? ` 🪨${next.stone}` : ''}${next.crafted ? ` 🍞${next.crafted}` : ''}${next.parts ? ` ⚙️${next.parts}` : ''}` });
     }
+    const c = this.interior.comfort();
+    items.push({ act: 'enter', emoji: '🚪', label: '進屋', enabled: !building, note: building ? '施工中' : `舒適度 ${c.total} ${'⭐'.repeat(c.stars)}` });
+    items.push({ act: 'tools', emoji: '🧰', label: '工具箱', enabled: true, note: '升級澆水壺、鋤頭、鐮刀…' });
     items.push({ act: 'wardrobe', emoji: '👕', label: '換裝', enabled: true, note: '換髮型、衣服顏色' });
-    items.push({ act: 'enter', emoji: '🚪', label: '進屋看看', enabled: false, note: '室內在 M3 開放' });
     return { title: h.tier === 1 ? '🏠 奶奶的小木屋' : `🏠 ${HOUSE_TIERS[h.tier]?.name ?? '小木屋'}`, sub, items };
   }
 
@@ -844,12 +953,15 @@ export class Game {
     const next = HOUSE_TIERS[d.house.tier + 1];
     if (!next) return;
     const hours = next.ms / 3600000;
-    const ok = await this.hud.confirm(`🔨 ${d.house.tier === 1 ? '修繕房屋' : `擴建成${next.name}`}`, `花費 🪙${next.coins} ＋ 🪵 木材 ×${next.wood}${next.stone ? ` ＋ 🪨 石材 ×${next.stone}` : ''}<br>木匠老木會來施工，大約 ${hours} 小時完工。`, '開始施工');
+    const extra = `${next.crafted ? ` ＋ 🍞 任意加工品 ×${next.crafted}` : ''}${next.parts ? ` ＋ ⚙️ 風車零件 ×${next.parts}` : ''}`;
+    const ok = await this.hud.confirm(`🔨 ${d.house.tier === 1 ? '修繕房屋' : `擴建成${next.name}`}`, `花費 🪙${next.coins.toLocaleString()} ＋ 🪵 木材 ×${next.wood}${next.stone ? ` ＋ 🪨 石材 ×${next.stone}` : ''}${extra}<br>木匠老木會來施工，大約 ${hours} 小時完工。`, '開始施工');
     if (!ok) return;
-    if (d.coins < next.coins || (d.inventory.wood ?? 0) < next.wood || (d.inventory.stone ?? 0) < next.stone || d.house.buildUntil) { this.hud.toast('材料不夠了'); return; }
+    if (d.coins < next.coins || (d.inventory.wood ?? 0) < next.wood || (d.inventory.stone ?? 0) < next.stone || d.house.buildUntil || (next.crafted && this.craftedCount() < next.crafted) || (next.parts && (d.inventory.windpart ?? 0) < next.parts)) { this.hud.toast('材料不夠了'); return; }
     d.coins -= next.coins;
     this.state.addItem('wood', -next.wood);
     if (next.stone) this.state.addItem('stone', -next.stone);
+    if (next.parts) this.state.addItem('windpart', -next.parts);
+    if (next.crafted) this.consumeCrafted(next.crafted);
     d.house.buildUntil = this.state.now() + next.ms;
     this.world.setScaffold(true);
     const L = this.sceneLayout.house;
@@ -865,7 +977,7 @@ export class Game {
     const L = this.sceneLayout.house;
     if (now >= h.buildUntil) {
       h.buildUntil = null;
-      h.tier = Math.min(3, h.tier + 1);
+      h.tier = Math.min(5, h.tier + 1);
       this.state.data.houseTier = h.tier;
       this.world.setScaffold(false);
       this.world.setHouseTier(h.tier);
@@ -873,7 +985,9 @@ export class Game {
       this.particles.burst('fluff', at, 30, { speed: 3.5, up: 3, gravity: -0.3, size: 0.28, life: 1.2 });
       this.particles.burst('sparkle', at.clone().setY(3), 24, { speed: 3, up: 4, size: 0.5, life: 1.4 });
       sfx.fanfare();
-      this.hud.toast(h.tier === 2 ? '🏠 房屋修繕完成！煙囪冒煙了，窗戶也亮起來了' : `🏠 ${HOUSE_TIERS[h.tier].name}落成！多了一間房間和門廊搖椅`, 4000);
+      const done: Record<number, string> = { 2: '🏠 房屋修繕完成！煙囪冒煙了，窗戶也亮起來了', 3: '🏠 紅頂農舍落成！多了一間臥室和門廊搖椅', 4: '🏡 雙層農莊落成！多了廚房和閣樓，陽台還有花台', 5: '🌬️ 風車莊園落成！風車轉起來了，晚上屋簷會亮起燈串' };
+      this.hud.toast(done[h.tier] ?? '🏠 房屋完工！', 4200);
+      this.interior.renderBar();
       this.pet.react();
       if (!this.player.busy && !this.current) this.player.play('celebrate');
       this.state.save();
@@ -888,6 +1002,43 @@ export class Game {
       sfx.hammer(Math.pow(Math.max(0, 1 - (dist - 4) / 14), 2));
       if (Math.random() < 0.3) this.particles.burst('fluff', new THREE.Vector3(L.x + (Math.random() - 0.5) * 5, 1 + Math.random() * 2.5, L.z + 2.6), 3, { speed: 0.6, up: 0.6, gravity: -0.2, size: 0.12, life: 0.9 });
     }
+  }
+
+  // 背包裡的加工品數量（房屋 T4 要用）
+  craftedCount(): number {
+    const inv = this.state.data.inventory;
+    return Object.entries(inv).reduce((n, [k, v]) => n + (RECIPE_BY_ID[k.split(':')[0]] && k !== 'windpart' ? v : 0), 0);
+  }
+
+  private consumeCrafted(n: number) {
+    const inv = this.state.data.inventory;
+    // 先用便宜的
+    const keys = Object.keys(inv).filter((k) => RECIPE_BY_ID[k.split(':')[0]] && k !== 'windpart').sort((a, b) => RECIPE_BY_ID[a.split(':')[0]].sell - RECIPE_BY_ID[b.split(':')[0]].sell);
+    for (const k of keys) { if (n <= 0) break; const take = Math.min(n, inv[k]); this.state.addItem(k, -take); n -= take; }
+  }
+
+  // 進出室內、拜訪好友時的淡入淡出
+  fade(on: boolean): Promise<void> {
+    this.fadeEl.classList.toggle('on', on);
+    return new Promise((r) => window.setTimeout(r, 320));
+  }
+
+  // 拜訪好友時把自己農場的東西藏起來
+  setOwnFarmVisible(v: boolean): void {
+    this.farm.root.visible = v;
+    this.weeds.root.visible = v;
+    this.debris.root.visible = v;
+    this.orchard.root.visible = v;
+    if (this.tools.robot) this.tools.robot.visible = v;
+    for (const o of this.treasureViews.values()) o.visible = v;
+    for (const b of Object.values(this.bubbles)) if (b.sprite.parent) b.sprite.parent.visible = v;
+  }
+
+  // 依距離播音效
+  soundAt(name: 'swish' | 'robot' | 'pop', at: THREE.Vector3): void {
+    const p = this.player.root.position;
+    const v = Math.pow(Math.max(0, 1 - (Math.hypot(at.x - p.x, at.z - p.z) - 3) / 14), 2);
+    sfx.at(v, () => (name === 'pop' ? sfx.pop(0) : sfx[name]()));
   }
 
   // ---------- 農場手帳 ----------
@@ -981,6 +1132,9 @@ export class Game {
   private deliverOrder(id: string) {
     const o = this.orders.deliver(id);
     if (!o) return;
+    // 月份主題：訂單金幣加成
+    const bonus = Math.round(o.coins * ((MONTH_THEME[new Date(this.state.now()).getMonth() + 1].orderCoins ?? 1) - 1));
+    if (bonus) { this.state.data.coins += bonus; o.coins += bonus; }
     this.progression.track('order');
     this.progression.track('coins', o.coins);
     const L = this.sceneLayout.mailbox;
@@ -1027,7 +1181,7 @@ export class Game {
     this.player.play(spec.tool === 'axe' ? 'chop' : 'mine', () => {
       const cur = this.debris.get(id);
       if (!cur) return;
-      cur.hits--;
+      cur.hits -= this.tools.power(spec.tool === 'axe' ? 'axe' : 'pick');
       if (spec.tool === 'axe') sfx.chop(); else sfx.mine();
       this.particles.burst(spec.item === 'wood' ? 'chip' : 'rock', pos, 5, { speed: 1.8, up: 2.5, size: spec.item === 'wood' ? 0.7 : 0.08 });
       if (cur.hits > 0) { this.debris.shake(id); return; }
@@ -1090,9 +1244,14 @@ export class Game {
         return done();
       case 'grass':
         this.player.play('hoe', () => {
-          this.farm.hoe(i, this.state.now());
+          const t = this.state.now();
+          for (const j of this.tools.area('hoe', i)) {
+            if (this.farm.status(j, t) !== 'grass') continue;
+            this.farm.hoe(j, t);
+            this.particles.burst('dirt', this.farm.worldPos(j, 0.15), j === i ? 9 : 5, { speed: 1.8, up: 3, size: 0.1 });
+            if (j !== i) this.queue = this.queue.filter((q) => !(q.kind === 'plot' && q.i === j));
+          }
           sfx.dig();
-          this.particles.burst('dirt', pos.clone().setY(0.15), 9, { speed: 1.8, up: 3, size: 0.1 });
         }, done);
         return;
       case 'tilled': {
@@ -1113,7 +1272,7 @@ export class Game {
         }
         const c = CROP_BY_ID[d.selectedSeed];
         if (!c || d.level < c.unlock) { this.hud.toast(`${c?.name ?? '種子'} 需要 Lv${c?.unlock}`); return done(); }
-        if (c.season !== 'all' && c.season !== this.season) { this.hud.toast(`${c.name} 只能在${SEASON_LABEL[c.season]}季種植`); return done(); }
+        if (c.season !== 'all' && c.season !== this.season && !this.farm.isGH(i)) { this.hud.toast(`${c.name} 只能在${SEASON_LABEL[c.season]}季種植（溫室裡什麼季節都能種）`); return done(); }
         if (d.coins < c.seed) { this.hud.toast('金幣不夠買種子了，先賣掉背包裡的東西吧 🎒'); return done(); }
         this.player.play('plant', () => {
           d.coins -= c.seed;
@@ -1128,11 +1287,18 @@ export class Game {
       case 'dry':
         if (this.tryFertilize(i)) return;
         this.player.play('water', () => {
-          this.farm.water(i, this.state.now());
-          this.progression.track('water');
-          sfx.water();
+          const t = this.state.now();
           const dir = new THREE.Vector3(0, -1, 0);
-          this.particles.burst('water', pos.clone().setY(0.9), 14, { speed: 0.8, up: 0.5, size: 0.07, dir, gravity: 12 });
+          // 水壺升級後一次澆多塊（只澆有作物、還沒濕的）
+          for (const j of this.tools.area('can', i)) {
+            const st = this.farm.status(j, t);
+            if (j !== i && st !== 'dry') continue;
+            this.farm.water(j, t);
+            this.progression.track('water');
+            this.particles.burst('water', this.farm.worldPos(j, 0.9), j === i ? 14 : 8, { speed: 0.8, up: 0.5, size: 0.07, dir, gravity: 12 });
+            if (j !== i) this.queue = this.queue.filter((q) => !(q.kind === 'plot' && q.i === j));
+          }
+          sfx.water();
         }, done);
         return;
       case 'growing': {
@@ -1149,8 +1315,10 @@ export class Game {
   }
 
   private harvest(i: number) {
+    const stolenBy = this.farm.plot(i).stolen;
     const res = this.farm.harvest(i, this.state.now());
     if (!res) return;
+    this.farm.plot(i).stolen = undefined;
     const { def, quality } = res;
     const pos = this.farm.worldPos(i, 0.5);
     const key = quality === 'normal' ? def.id : `${def.id}:${quality}`;
@@ -1168,7 +1336,8 @@ export class Game {
     this.particles.burst('sparkle', pos, quality === 'gold' ? 10 : 4, { speed: 1.2, up: 1.5, size: 0.35, life: 0.8 });
     this.particles.burst('grass', pos.clone().setY(0.2), 5, { speed: 1.2, up: 2, size: 0.8 });
     this.fx.fly(pos, def.emoji, this.hud.el('bag'));
-    this.gainXp(def.xp, pos, true);
+    this.gainXp(Math.round(def.xp * (stolenBy ? 0.8 : 1)), pos, true, 'harvest');
+    if (stolenBy) this.fx.float(pos.clone().setY(1.5), `被${stolenBy}偷走了一點點 🤭`, 'bad', 0.4);
     if (quality !== 'normal') this.fx.float(pos.clone().setY(1), `${QUALITY_LABEL[quality]}！`, 'coin', 0.25);
     if (this.pet.species === 'bunny' && def.shape.kind === 'root' && Math.random() < 0.1) {
       this.state.addItem(key);
@@ -1219,7 +1388,8 @@ export class Game {
     if (!c) return;
     const d = this.state.data;
     if (d.level < c.unlock) { this.hud.toast(`${c.name} 在 Lv${c.unlock} 解鎖`); return; }
-    if (c.season !== 'all' && c.season !== this.season) { this.hud.toast(`${c.name} 只能在${SEASON_LABEL[c.season]}季種植`); return; }
+    const pp = this.player.root.position;
+    if (c.season !== 'all' && c.season !== this.season && !this.farm.inGreenhouse(pp.x, pp.z)) { this.hud.toast(`${c.name} 只能在${SEASON_LABEL[c.season]}季種植（溫室裡什麼季節都能種）`); return; }
     d.selectedSeed = id;
     d.selectedTool = 'seed';
     sfx.ui();
@@ -1230,18 +1400,19 @@ export class Game {
   private actWeed(id: string) {
     const w = this.weeds.get(id);
     if (!w) return this.finish();
-    const useSickle = this.state.data.level >= SICKLE_LEVEL && (w.kind === 'bush' || w.kind === 'big');
+    const useSickle = this.tools.tier('sickle') >= 1 && (w.kind === 'bush' || w.kind === 'big');
     if (useSickle) {
       this.player.play('sickle', () => {
         sfx.swish();
         // 鐮刀：前方扇形 1.3 m 內最多 3 株
         const p = this.player.root.position;
         const yaw = this.player.root.rotation.y;
+        const reach = this.tools.sickleReach();
         const hits = this.weeds.list
           .map((x) => ({ x, d: Math.hypot(x.tx + x.ox - p.x, x.tz + x.oz - p.z), a: Math.atan2(x.tx + x.ox - p.x, x.tz + x.oz - p.z) }))
-          .filter((h) => h.x.id === id || (h.d < 1.3 && Math.abs(Math.atan2(Math.sin(h.a - yaw), Math.cos(h.a - yaw))) < 1.2))
+          .filter((h) => h.x.id === id || (h.d < reach.r && Math.abs(Math.atan2(Math.sin(h.a - yaw), Math.cos(h.a - yaw))) < 1.2))
           .sort((a, b) => a.d - b.d)
-          .slice(0, 3);
+          .slice(0, reach.n);
         hits.forEach((h, k) => window.setTimeout(() => this.removeWeed(h.x), k * 70));
       }, () => this.finish());
       return;
@@ -1279,9 +1450,12 @@ export class Game {
     this.particles.burst(kindFx, pos, w.kind === 'big' ? 14 : 9, kindFx === 'fluff' ? { speed: 1, up: 1.2, gravity: 0.4, size: 0.06, life: 1.8 } : { speed: 2, up: 3.5, size: kindFx === 'grass' ? 0.9 : 0.12 });
     this.particles.burst('dirt', pos.clone().setY(0.05), 5, { speed: 1.5, up: 2.5, size: 0.08 });
     const [item, n] = WEED_ITEM[w.kind];
-    this.state.addItem(item, n);
+    const pr = w.by ? 2 : 1; // 好友惡作劇放的草：獎勵加倍
+    this.state.addItem(item, n * pr);
     this.fx.fly(pos, ITEM_INFO[item].emoji, this.hud.el('bag'));
-    this.gainXp(WEED_XP[w.kind], pos, false);
+    this.gainXp(WEED_XP[w.kind] * pr, pos, false, 'weed');
+    if (w.by) this.fx.float(pos.clone().setY(1.3), `${w.by}放的草！獎勵 ×2`, 'love', 0.3);
+    if (d.settings.haptics) navigator.vibrate?.(12);
     // 小機率撿到幸運物
     const r = Math.random();
     if (r < 0.01) this.luckyFind('clover', pos);
@@ -1316,7 +1490,7 @@ export class Game {
       const left = this.state.petTouchesLeft(this.state.now());
       if (left > 0) {
         const before = bondLevel(d.pet.bond);
-        const pts = PET_TOUCH_POINTS * (d.pet.species === 'duck' && this.weather === 'rain' ? 2 : 1);
+        const pts = Math.round(PET_TOUCH_POINTS * (d.pet.species === 'duck' && this.weather === 'rain' ? 2 : 1) * (MONTH_THEME[new Date(this.state.now()).getMonth() + 1].bond ?? 1));
         d.pet.touches++;
         d.pet.bond += pts;
         this.progression.track('pet');
@@ -1332,6 +1506,7 @@ export class Game {
         this.particles.burst('heart', at, 2, { speed: 0.6, up: 1, size: 0.3, life: 1 });
         this.hud.toast(`${this.pet.name}今天已經被摸夠囉（每天 3 次）`);
       }
+      this.festival.tryEnvelope();
     }, () => this.finish());
   }
 
@@ -1413,8 +1588,8 @@ export class Game {
   }
 
   // ---------- 經驗與升級 ----------
-  gainXp(base: number, at: THREE.Vector3, useRested: boolean): void {
-    const r = this.state.addXp(base, useRested);
+  gainXp(base: number, at: THREE.Vector3, useRested: boolean, kind: 'harvest' | 'weed' | 'other' = 'other'): void {
+    const r = this.state.addXp(Math.round(base * this.calendar.xpMult(kind, this.state.now())), useRested);
     this.fx.float(at, `+${r.gained} XP${r.rested ? ' ✨' : ''}`, r.rested ? 'rested' : 'xp');
   }
 
@@ -1430,7 +1605,13 @@ export class Game {
     if (level === 30) unlocks.push('📬 訂單 6 張');
     if (level === WORKSHOP_LEVEL) unlocks.push('🍞 加工坊');
     if (level === ORCHARD_LEVEL) unlocks.push('🌳 果園', '🏡 紅頂農舍');
-    if (level === 40) unlocks.push('🍞 加工欄位 4 格');
+    if (level === 40) unlocks.push('🍞 加工欄位 4 格', '🌱 溫室');
+    if (level === 50) unlocks.push('🏡 雙層農莊');
+    if (level === 55 || level === 70) unlocks.push('🌱 溫室擴建');
+    if (level === 60) unlocks.push('⚙️ 風車零件配方');
+    if (level === 75) unlocks.push('🤖 除草小機器人');
+    if (level === 80) unlocks.push('🌬️ 風車莊園');
+    for (const [id, t] of Object.entries(TOOLS)) t.tiers.forEach((tt, k) => { if (k > 0 && tt.level === level && tt.coins > 0) unlocks.push(`${TOOLS[id as keyof typeof TOOLS].emoji} ${tt.name}`); });
     this.progression.poke();
     this.hud.levelUp(level, unlocks);
     this.particles.burst('sparkle', this.player.root.position.clone().setY(1.2), 20, { speed: 3, up: 4, size: 0.45, life: 1.2 });
@@ -1459,7 +1640,7 @@ export class Game {
     const inv = this.state.data.inventory;
     let total = 0, n = 0;
     for (const k of Object.keys(inv)) {
-      if (['clover', 'coin_old', 'hay', 'wood', 'stone', 'fert', 'giantseed'].includes(k)) continue; // 收藏品、飼料、建材、肥料不賣
+      if (['clover', 'coin_old', 'hay', 'wood', 'stone', 'fert', 'giantseed', 'windpart', 'token'].includes(k) || k.startsWith('pethat_')) continue; // 收藏品、飼料、建材、肥料、配件不賣
       const info = this.itemInfo(k) ?? ITEM_INFO[k];
       if (!info) continue;
       total += info.price * inv[k];
@@ -1522,7 +1703,9 @@ export class Game {
     if (fert > 0 || d.compost.length) slots.push({ id: 'fert', emoji: '🧪', name: '有機肥', sub: `×${fert}`, selected: d.selectedTool === 'fert', lock: fert > 0 ? '' : '製作中' });
     const gs = d.inventory.giantseed ?? 0;
     if (gs > 0) slots.push({ id: 'giant', emoji: '🌰', name: '巨型種子', sub: `×${gs}`, selected: d.selectedTool === 'giant', lock: '' });
-    const inSeason = CROPS.filter((c) => c.season === 'all' || c.season === this.season);
+    const pp = this.player.root.position;
+    const inGH = this.farm.inGreenhouse(pp.x, pp.z);
+    const inSeason = CROPS.filter((c) => inGH ? !c.night : c.season === 'all' || c.season === this.season);
     const next = inSeason.filter((c) => c.unlock > d.level).sort((a, b) => a.unlock - b.unlock)[0];
     for (const c of inSeason) {
       if (c.unlock > d.level && c !== next) continue;
@@ -1553,9 +1736,12 @@ export class Game {
       this.refreshTreasure(now);
       if (this.debris.daily(now, (x, z) => !!this.weeds.at(x, z))) this.world.rebuildGrid();
       if (this.orders.refresh(now)) this.hud.toast('📬 郵筒來了新的訂單！', 2400);
-      // 換季後選到的種子不能種了：換回蘿蔔
+      // 換季後選到的種子不能種了：換回蘿蔔（在溫室裡不用換）
       const sel = CROP_BY_ID[this.state.data.selectedSeed];
-      if (sel && sel.season !== 'all' && sel.season !== this.season) this.state.data.selectedSeed = 'radish';
+      const pp = this.player.root.position;
+      if (sel && sel.season !== 'all' && sel.season !== this.season && !this.farm.inGreenhouse(pp.x, pp.z)) this.state.data.selectedSeed = 'radish';
+      this.festival.tick(now);
+      this.calendar.tick(now);
       this.weather = this.weatherOverride ?? weatherAt(now, this.season);
       this.checkGrowth(now);
       this.progression.refresh(now);
@@ -1591,6 +1777,16 @@ export class Game {
     this.progression.update(dt);
     this.world.workshopBusy = this.workshop.busy;
     this.updateConstruction(dt, now);
+    this.greenhouse.update(dt, now);
+    this.tools.update(dt, now);
+    this.interior.update(dt, this.stage.glow);
+    this.festival.update(dt, this.stage.glow);
+    this.social.update(dt, now, this.weather === 'rain' || this.weather === 'snow');
+    this.music.night = night || hour >= 20;
+    this.music.raining = this.weather === 'rain';
+    this.music.indoor = this.interior.active;
+    this.music.update(dt);
+    this.world.setGrassPushers([this.player.root.position, this.pet.root.position, this.ranch.cow.root.position]);
     this.tutorialHint = this.tutorial.update(dt);
     {
       const d = this.state.data;
@@ -1606,13 +1802,16 @@ export class Game {
     this.placeMenu();
     this.player.update(dt);
     const dh = this.sceneLayout.doghouse;
-    if (!this.onboarding || this.state.data.onboard === 'done') {
-      this.petSkills.update(dt, now, night);
-      this.pet.update(dt, { player: this.player, night, doghouse: { x: dh.x, z: dh.z, rotY: dh.rotY }, treasures: this.pet.species === 'corgi' ? this.state.data.treasure.spots : [], followDist: this.petTuning.followDist });
+    if (this.interior.active) {
+      // 室內：寵物跟著主角，主角發呆一陣子（或晚上）就跑去牠最喜歡的家具上睡
+      this.pet.update(dt, { player: this.player, night: night || this.player.idleTime > 6, doghouse: this.interior.petHome, treasures: [], followDist: 1.8 });
+    } else if (!this.onboarding || this.state.data.onboard === 'done') {
+      if (!this.social.visiting) this.petSkills.update(dt, now, night);
+      this.pet.update(dt, { player: this.player, night: night && !this.social.visiting, doghouse: { x: dh.x, z: dh.z, rotY: dh.rotY }, treasures: this.pet.species === 'corgi' && !this.social.visiting ? this.state.data.treasure.spots : [], followDist: this.petTuning.followDist });
     }
     this.showcaseTick?.(dt);
     if (this.growT > 0) { this.growT -= dt; if (this.growT <= 0) this.stage.closeUp(null); }
-    if (!this.mower.active && !this.onboarding) this.runQueue();
+    if (!this.mower.active && !this.onboarding && !this.interior.active && !this.social.visiting) this.runQueue();
     if (this.current?.kind === 'weed' && this.player.animName === 'pull') {
       const u = this.player.animT;
       this.weeds.setTug(this.current.id, u < 0.25 ? 0 : u < 0.66 ? (u - 0.25) / 0.41 : 0);
@@ -1636,7 +1835,7 @@ export class Game {
     this.saveT -= dt;
     if (this.saveT <= 0) { this.saveT = 10; this.state.save(); }
     this.autoQuality(dt);
-    if (this.stage.checkResize()) this.applyLayout();
+    if (this.stage.checkResize()) { this.applyLayout(); if (this.interior.active) this.interior.aim(); }
     this.stage.render();
   }
 

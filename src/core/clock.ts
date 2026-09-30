@@ -10,6 +10,7 @@ class GameClock {
   scale = 1;
   seasonOverride: Season | null = null; // DEV：強制季節
   hourOverride: number | null = null; // DEV：光影時段預覽（不影響作物）
+  south = false; // 南半球：季節對調（設定裡切換）
 
   now(): number {
     return this.baseGame + (Date.now() - this.baseReal) * this.scale;
@@ -45,7 +46,8 @@ class GameClock {
 
   season(t = this.now()): Season {
     if (this.seasonOverride) return this.seasonOverride;
-    const m = new Date(t).getMonth() + 1;
+    let m = new Date(t).getMonth() + 1;
+    if (this.south) m = ((m + 5) % 12) + 1;
     if (m >= 3 && m <= 5) return 'spring';
     if (m >= 6 && m <= 8) return 'summer';
     if (m >= 9 && m <= 11) return 'autumn';

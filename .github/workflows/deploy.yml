@@ -26,7 +26,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Supabase 金鑰放在 repo Secrets；沒設定時是空字串，遊戲自動用單機模擬的鄰居（docs/10 §4.2）
       - run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist

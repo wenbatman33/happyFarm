@@ -1,0 +1,43 @@
+# Supabase CLI 本機開發設定（`supabase start`）
+# 只寫跟預設值不同、或本專案需要的設定；其餘沿用 CLI 預設值。
+# 部署步驟見 docs/10-Supabase-部署.md
+project_id = "happyfarm"
+
+[api]
+enabled = true
+port = 54321
+# 只對外開放 public（private schema 放內部 helper，不能透過 REST 呼叫）
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+# 本機 Vite 開發伺服器（vite.config.ts 的 server.port）
+site_url = "http://localhost:5188/"
+additional_redirect_urls = [
+  "http://localhost:5188/**",
+  "http://127.0.0.1:5188/**",
+  "https://wenbatman33.github.io/happyFarm/**",
+]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+# 魔法連結登入；本機寄出的信可在 Inbucket／Mailpit（http://localhost:54324）看到
+enable_signup = true
+enable_confirmations = false
+double_confirm_changes = true
+
+# 推播排程由 pg_cron 帶 x-cron-secret 呼叫，不用 JWT 驗證（函式內自己檢查 CRON_SECRET）
+[functions.push-scheduler]
+verify_jwt = false

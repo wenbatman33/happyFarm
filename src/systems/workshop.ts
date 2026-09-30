@@ -1,5 +1,6 @@
 import { CROP_BY_ID } from '../data/crops';
 import { RECIPES, RECIPE_BY_ID, WORKSHOP_LEVEL, workshopSlots, type Recipe } from '../data/recipes';
+import { MONTH_THEME } from '../data/economy';
 import type { Game } from '../game';
 import { ITEM_INFO } from '../ui/hud';
 import type { WorkSlot } from './state';
@@ -34,7 +35,8 @@ export class Workshop {
   }
 
   durationMs(r: Recipe): number {
-    return r.minutes * 60000 * (this.game.state.data.pet.species === 'cat' ? 0.9 : 1);
+    const theme = MONTH_THEME[new Date(this.game.state.now()).getMonth() + 1].craftTime ?? 1;
+    return r.minutes * 60000 * (this.game.state.data.pet.species === 'cat' ? 0.9 : 1) * theme;
   }
 
   start(id: string, now: number): boolean {

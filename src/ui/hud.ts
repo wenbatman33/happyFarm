@@ -1,5 +1,5 @@
 import type { HudKey, Layout } from '../config/layout';
-import { MILK_SELL, xpNext } from '../data/economy';
+import { LEVEL_CAP, MILK_SELL, xpNext } from '../data/economy';
 import { RECIPES } from '../data/recipes';
 import { TREES } from '../data/trees';
 import { GIANTS } from '../data/crops';
@@ -57,6 +57,8 @@ export class Hud {
   onSell?: () => void;
   onMow?: () => void;
   onJournal?: () => void;
+  onFriends?: () => void;
+  onSettings?: () => void;
   onMenuAct?: (key: string, act: string) => void;
   onDeliver?: (id: string) => void;
   onSkip?: (id: string) => void;
@@ -79,9 +81,11 @@ export class Hud {
         <div class="pill clock"><span class="wx">☀️</span><span class="date"></span></div>
         <div class="pill coins">🪙 <b class="coin-n">0</b></div>
         <button class="pill icon-btn mute" title="音效">🔊</button>
+        <button class="pill icon-btn gear" title="設定">⚙️</button>
       </div>
       <div class="hud-el" data-hud="toolbar"><div class="seeds"></div></div>
       <div class="hud-el" data-hud="bag">
+        <button class="round-btn fr-btn" title="好友 (F)"><span>👥</span><i class="badge hidden">0</i></button>
         <button class="round-btn jn-btn" title="農場手帳 (J)"><span>📔</span><i class="badge hidden">0</i></button>
         <button class="round-btn mow-btn" title="除草機 (R)"><span>🚜</span></button>
         <button class="round-btn pet-btn" title="麻糬"><span>🐶</span><i class="bond"></i></button>
@@ -89,6 +93,7 @@ export class Hud {
       </div>
       <div class="hud-el" data-hud="queue"><div class="queue"></div></div>
       <div class="hud-el" data-hud="toast"><div class="toast hidden"></div></div>
+      <div class="hud-el" data-hud="event"></div>
     `;
     document.body.appendChild(this.root);
     this.root.querySelectorAll<HTMLElement>('.hud-el').forEach((el) => (this.els[el.dataset.hud as HudKey] = el));
@@ -97,6 +102,8 @@ export class Hud {
     $('.mute', this.root).onclick = () => this.onMute?.();
     $('.mow-btn', this.root).onclick = () => this.onMow?.();
     $('.jn-btn', this.root).onclick = () => this.onJournal?.();
+    $('.fr-btn', this.root).onclick = () => this.onFriends?.();
+    $('.gear', this.root).onclick = () => this.onSettings?.();
     // 工具列：滑鼠滾輪橫向捲動
     const seeds = $('.seeds', this.root);
     seeds.addEventListener('wheel', (e) => { seeds.scrollLeft += e.deltaY; e.preventDefault(); }, { passive: false });
@@ -180,9 +187,10 @@ export class Hud {
 
   setStatus(level: number, xp: number, rested: number): void {
     const need = xpNext(level);
+    const max = level >= LEVEL_CAP;
     $('.lv', this.root).textContent = `Lv ${level}`;
-    ($('.xpfill', this.root) as HTMLElement).style.width = `${Math.min(100, (xp / need) * 100)}%`;
-    $('.xptext', this.root).textContent = `${Math.floor(xp).toLocaleString()} / ${need.toLocaleString()}`;
+    ($('.xpfill', this.root) as HTMLElement).style.width = max ? '100%' : `${Math.min(100, (xp / need) * 100)}%`;
+    $('.xptext', this.root).textContent = max ? 'MAX' : `${Math.floor(xp).toLocaleString()} / ${need.toLocaleString()}`;
     $('.rested', this.root).classList.toggle('hidden', rested <= 0);
   }
 
@@ -259,6 +267,12 @@ export class Hud {
 
   setJournalBadge(n: number): void {
     const b = $('.jn-btn .badge', this.root);
+    b.textContent = String(n);
+    b.classList.toggle('hidden', n <= 0);
+  }
+
+  setFriendBadge(n: number): void {
+    const b = $('.fr-btn .badge', this.root);
     b.textContent = String(n);
     b.classList.toggle('hidden', n <= 0);
   }

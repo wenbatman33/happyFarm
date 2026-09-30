@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GEO } from './materials';
 
 // 簡易粒子池：泥土、草屑、水滴、閃光、愛心、落葉、雪
-export type ParticleKind = 'dirt' | 'grass' | 'water' | 'sparkle' | 'heart' | 'leaf' | 'snow' | 'seed' | 'fluff' | 'zzz' | 'milk' | 'hay' | 'chip' | 'rock';
+export type ParticleKind = 'dirt' | 'grass' | 'water' | 'sparkle' | 'heart' | 'leaf' | 'snow' | 'seed' | 'fluff' | 'zzz' | 'milk' | 'hay' | 'chip' | 'rock' | 'fw0' | 'fw1' | 'fw2' | 'fw3' | 'petal';
 
 interface P {
   obj: THREE.Object3D;
@@ -76,6 +76,12 @@ const mats = {
   heart: new THREE.SpriteMaterial({ map: heartTex, depthWrite: false }),
   sparkle: new THREE.SpriteMaterial({ map: starTex, depthWrite: false, blending: THREE.AdditiveBlending }),
   zzz: new THREE.SpriteMaterial({ map: zTex, depthWrite: false, opacity: 0.85 }),
+  // 煙火：四種顏色的星光
+  fw0: new THREE.SpriteMaterial({ map: starTex, depthWrite: false, blending: THREE.AdditiveBlending, color: '#ff5a5a' }),
+  fw1: new THREE.SpriteMaterial({ map: starTex, depthWrite: false, blending: THREE.AdditiveBlending, color: '#ffd84a' }),
+  fw2: new THREE.SpriteMaterial({ map: starTex, depthWrite: false, blending: THREE.AdditiveBlending, color: '#6ad8ff' }),
+  fw3: new THREE.SpriteMaterial({ map: starTex, depthWrite: false, blending: THREE.AdditiveBlending, color: '#ff8ae0' }),
+  petal: new THREE.MeshStandardMaterial({ color: '#ffb8d2', roughness: 0.8 }),
 };
 
 export class Particles {
@@ -87,12 +93,12 @@ export class Particles {
   private take(kind: ParticleKind): { obj: THREE.Object3D; sprite: boolean } {
     const pool = this.pools.get(kind) ?? [];
     this.pools.set(kind, pool);
-    const sprite = kind === 'heart' || kind === 'sparkle' || kind === 'zzz';
+    const sprite = kind === 'heart' || kind === 'sparkle' || kind === 'zzz' || kind.startsWith('fw');
     let obj = pool.pop();
     if (!obj) {
       if (sprite) obj = new THREE.Sprite(mats[kind as 'heart']);
       else {
-        const geo = kind === 'grass' || kind === 'leaf' || kind === 'hay' || kind === 'chip' ? GEO.blade : kind === 'rock' ? GEO.ico : GEO.sphereLo;
+        const geo = kind === 'grass' || kind === 'leaf' || kind === 'hay' || kind === 'chip' || kind === 'petal' ? GEO.blade : kind === 'rock' ? GEO.ico : GEO.sphereLo;
         const m = new THREE.Mesh(geo, mats[kind as 'dirt']);
         m.castShadow = false;
         obj = m;

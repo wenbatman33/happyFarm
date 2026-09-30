@@ -4,6 +4,21 @@ class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   muted = false;
+  private vmul = 1;
+  private unlockCbs: ((ctx: AudioContext, out: GainNode) => void)[] = [];
+
+  // 背景音樂、環境音用：取得 AudioContext（第一次互動解鎖後才有）
+  onReady(cb: (ctx: AudioContext, out: GainNode) => void): void {
+    if (this.ctx && this.master) cb(this.ctx, this.master);
+    else this.unlockCbs.push(cb);
+  }
+
+  // 依距離調整音量：在 fn 裡播的音效都會乘上 v
+  at(v: number, fn: () => void): void {
+    if (v < 0.02) return;
+    this.vmul = Math.min(1, v);
+    try { fn(); } finally { this.vmul = 1; }
+  }
 
   unlock(): void {
     if (this.ctx) {
@@ -16,6 +31,8 @@ class Sfx {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.45;
     this.master.connect(this.ctx.destination);
+    for (const cb of this.unlockCbs) cb(this.ctx, this.master);
+    this.unlockCbs = [];
   }
 
   setMuted(m: boolean): void {
@@ -38,7 +55,7 @@ class Sfx {
     o.frequency.setValueAtTime(freq, t);
     if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol * this.vmul), t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g).connect(r.out);
     o.start(t);
@@ -59,7 +76,7 @@ class Sfx {
     f.type = filterType;
     f.frequency.value = freq;
     const g = r.ctx.createGain();
-    g.gain.value = vol;
+    g.gain.value = vol * this.vmul;
     src.connect(f).connect(g).connect(r.out);
     src.start(t);
   }
@@ -207,6 +224,15 @@ class Sfx {
   meow(): void { this.tone(620, 0.35, 'triangle', 0.18, 880); this.tone(880, 0.25, 'sine', 0.08, 520, 0.2); }
   quack(): void { this.tone(420, 0.12, 'sawtooth', 0.12, 300); this.noise(0.1, 'bandpass', 900, 0.15); }
   squeak(): void { this.tone(2400, 0.07, 'sine', 0.12, 3200); this.tone(2800, 0.06, 'sine', 0.1, 3600, 0.08); }
+  // M3 第二批／M4 新增
+  door(): void { this.tone(180, 0.18, 'triangle', 0.18, 120); this.noise(0.25, 'lowpass', 600, 0.18, 0.05); }
+  place(): void { this.tone(260, 0.08, 'sine', 0.3, 180); this.noise(0.06, 'lowpass', 900, 0.2); }
+  pickup(): void { this.tone(520, 0.08, 'sine', 0.2, 780); }
+  robot(): void { this.tone(1400, 0.05, 'square', 0.05); this.tone(1800, 0.05, 'square', 0.05, undefined, 0.07); }
+  envelope(): void { [784, 988, 1175, 1568].forEach((f, i) => this.tone(f, 0.16, 'triangle', 0.22, undefined, i * 0.07)); this.coin(); }
+  firework(): void { this.tone(300, 0.6, 'sine', 0.08, 1400); this.noise(0.7, 'lowpass', 2200, 0.35, 0.6); }
+  chime(): void { [1319, 1760, 2093].forEach((f, i) => this.tone(f, 0.5, 'sine', 0.08, undefined, i * 0.12)); }
+  cheer(): void { [659, 784, 988, 1319].forEach((f, i) => this.tone(f, 0.22, 'square', 0.06, undefined, i * 0.08)); }
   paper(): void { this.noise(0.18, 'highpass', 2400, 0.12); }
 }
 

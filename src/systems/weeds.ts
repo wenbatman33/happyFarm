@@ -139,6 +139,14 @@ export class Weeds {
     return born;
   }
 
+  // 好友的惡作劇：在房子附近放一株草（拔掉時獎勵加倍）
+  spawnPrank(by: string, now: number, season: Season): WeedSave | null {
+    const z = this.zones.find((zz) => zz.name === 'house')!;
+    const w = this.spawn(z, now, season, mulberry32(hashStr(by + now)), 'bush');
+    if (w) { w.by = by; w.zone = 'prank'; }
+    return w;
+  }
+
   forceSpawn(n: number, now: number, season: Season, kind?: WeedKind): void {
     const rand = mulberry32(hashStr('dev' + now));
     for (let i = 0; i < n; i++) this.spawn(this.zones[i % this.zones.length], now, season, rand, kind);

@@ -4,6 +4,8 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { LAYOUT_MOBILE, LAYOUT_PC, LIGHT_TWEAKS, PET_TUNING, SCENE_LAYOUT, clone, type HudKey, type PropPlacement } from '../config/layout';
 import { clock, type Season } from '../core/clock';
 import { Models } from '../world/models';
+import { FURNITURE } from '../data/furniture';
+import { FESTIVALS, type FestivalId } from '../data/festivals';
 import { BOND_THRESHOLDS, xpNext } from '../data/economy';
 import type { Game } from '../game';
 import type { Weather } from '../systems/weather';
@@ -13,6 +15,7 @@ import type { Weather } from '../systems/weather';
 
 const STORE = 'happyFarm.dev';
 interface Persisted {
+  v?: number;
   layouts?: { pc: typeof LAYOUT_PC; mobile: typeof LAYOUT_MOBILE };
   scene?: typeof SCENE_LAYOUT;
   light?: typeof LIGHT_TWEAKS;
@@ -49,10 +52,17 @@ export class DevTools {
   static applyPersisted(): Persisted {
     let p: Persisted = {};
     try { p = JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { /* 忽略 */ }
+    // v2（2026-10-01）：新增溫室、市集，樹的位置有調整；舊的樹位置不要套回去
+    if ((p.v ?? 1) < 2 && p.scene) delete (p.scene as Partial<typeof SCENE_LAYOUT>).trees;
     if (p.scene) Object.assign(SCENE_LAYOUT, p.scene);
     if (p.light) Object.assign(LIGHT_TWEAKS, p.light);
     if (p.pet) Object.assign(PET_TUNING, p.pet);
-    if (p.layouts) { Object.assign(LAYOUT_PC, p.layouts.pc); Object.assign(LAYOUT_MOBILE, p.layouts.mobile); }
+    // 版面：逐項合併，舊存的設定沒有新 HUD 元件（例如節慶橫幅）時沿用預設值
+    if (p.layouts) for (const [dst, src] of [[LAYOUT_PC, p.layouts.pc], [LAYOUT_MOBILE, p.layouts.mobile]] as const) {
+      if (!src) continue;
+      Object.assign(dst.hud, src.hud ?? {});
+      Object.assign(dst.camera, src.camera ?? {});
+    }
     if (p.clock) clock.restore(p.clock.offset, p.clock.scale);
     return p;
   }
@@ -93,7 +103,7 @@ export class DevTools {
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => {
       const g = this.game;
-      const p: Persisted = { layouts: g.layouts, scene: g.sceneLayout, light: g.light, pet: g.petTuning, clock: { offset: clock.offset, scale: clock.scale }, layoutMode: g.layoutMode };
+      const p: Persisted = { v: 2, layouts: g.layouts, scene: g.sceneLayout, light: g.light, pet: g.petTuning, clock: { offset: clock.offset, scale: clock.scale }, layoutMode: g.layoutMode };
       localStorage.setItem(STORE, JSON.stringify(p));
     }, 300);
   }
@@ -175,7 +185,7 @@ export class DevTools {
     af.add({ f: () => { g.state.data.cows[0].brushes = 0; } }, 'f').name('🪮 重置刷毛次數');
     af.add({ f: () => g.state.addItem('hay', 10) }, 'f').name('🌾 +10 牧草');
     af.add({ f: () => g.player.play('celebrate') }, 'f').name('🙌 主角慶祝');
-    af.add({ f: () => { const h = g.state.data.house; h.buildUntil = null; g.world.setScaffold(false); h.tier = h.tier >= 3 ? 1 : h.tier + 1; g.world.setHouseTier(h.tier); } }, 'f').name('🏠 房屋階段 T1→T2→T3');
+    af.add({ f: () => { const h = g.state.data.house; h.buildUntil = null; g.world.setScaffold(false); h.tier = h.tier >= 5 ? 1 : h.tier + 1; g.state.data.houseTier = h.tier; g.world.setHouseTier(h.tier); g.world.rebuildGrid(); } }, 'f').name('🏠 房屋階段 T1→…→T5');
     af.add({ f: () => { g.state.data.workshop.forEach((s) => (s.doneAt = 0)); } }, 'f').name('🍞 加工立即完成');
     af.add({ f: () => { g.state.data.trees.forEach((t) => { t.plantedAt -= 30 * 86400000; t.pickedAt = 0; }); } }, 'f').name('🌳 果樹立即成熟並結果');
     af.add({ f: () => g.state.addItem('giantseed', 1) }, 'f').name('🌰 +1 巨型種子');
@@ -187,7 +197,60 @@ export class DevTools {
     af.add({ f: () => { g.state.data.compost = g.state.data.compost.map(() => 0); } }, 'f').name('🪣 堆肥立即完成');
     af.add({ f: () => { g.orders.d.slot = ''; g.orders.refresh(g.state.now()); } }, 'f').name('📬 刷新訂單');
     af.add({ f: () => { g.state.data.tutorial = 0; void g.tutorial.start(); } }, 'f').name('🎓 重跑新手引導');
-    af.add({ f: () => { if (confirm('確定要重設存檔？')) { g.state.reset(); localStorage.removeItem('happyFarm.save'); location.reload(); } } }, 'f').name('🗑 重設存檔');
+    af.close();
+
+    // ---- M3 第二批／M4／M5 ----
+    const mf = gui.addFolder('🌱 溫室・工具・室內');
+    mf.add({ f: () => { const gh = g.state.data.greenhouse; if (gh.buildUntil) { gh.buildUntil = now(); return; } if (gh.level >= 3) return; gh.level++; g.farm.grantGreenhouse(gh.level, now()); g.world.setGreenhouse(gh.level, false); g.world.rebuildGrid(); } }, 'f').name('🌱 溫室升一期（施工中則立即完成）');
+    mf.add({ f: () => { const d = g.state.data; for (const k of Object.keys(d.tools) as (keyof typeof d.tools)[]) d.tools[k] = k === 'robot' ? 1 : 2; d.robotAt = now() - 3600000; g.tools.render(); } }, 'f').name('🧰 工具全部升滿＋機器人');
+    mf.add({ f: () => void g.interior.enter() }, 'f').name('🚪 進屋');
+    mf.add({ f: () => { for (const f of FURNITURE) g.interior.grant(f.id); g.hud.toast('🛋️ 每件家具各 +1'); } }, 'f').name('🛋️ 所有家具各給一件');
+    mf.add({ f: () => { g.state.addItem('windpart', 5); for (const r of ['flour', 'bread', 'jam']) g.state.addItem(r, 10); } }, 'f').name('⚙️ +5 風車零件、+30 加工品');
+    mf.close();
+
+    const ef = gui.addFolder('🎉 節慶・日曆');
+    ef.add({ id: 'auto' }, 'id', ['auto', ...Object.keys(FESTIVALS)]).name('強制節慶').onChange((id: string) => { g.festival.override = id === 'auto' ? null : (id as FestivalId); g.festival.tick(now()); });
+    ef.add({ k: 'auto' }, 'k', ['auto', 'none', 'market', 'merchant']).name('市集攤位').onChange((k: string) => { g.calendar.override = k === 'auto' ? null : (k as 'none' | 'market' | 'merchant'); g.calendar.tick(now()); });
+    ef.add({ f: () => { g.state.data.festival.tokens += 100; } }, 'f').name('🏵️ +100 節慶代幣');
+    ef.add({ f: () => { g.state.data.festival.envelopeDay = ''; } }, 'f').name('🧧 紅包重置');
+    ef.add({ f: () => { const s = g.state.data.stamps; for (let i = 1; i <= 25; i++) { const k = `x${i}`; if (!s.days.includes(k)) s.days.push(k); } } }, 'f').name('📅 印章 +25 天');
+    ef.add({ f: () => { const d = g.state.data; d.createdAt -= 400 * 86400000; } }, 'f').name('📜 解鎖故事（加入天數 +400）');
+    ef.add({ f: () => g.calendar.welcomeBack(now(), 8 * 24) }, 'f').name('👋 模擬 8 天沒上線（回流禮包）');
+    ef.add({ f: () => g.calendar.welcomeBack(now(), 31 * 24) }, 'f').name('📓 模擬 31 天沒上線（想你日記）');
+    ef.close();
+
+    const soc = gui.addFolder('👥 社交');
+    soc.add({ f: () => void g.social.open() }, 'f').name('👥 好友面板');
+    soc.add({ f: () => void g.social.visit('NPC-MING') }, 'f').name('🏡 拜訪阿明');
+    soc.add({ f: () => void g.social.leave() }, 'f').name('🏠 回家');
+    soc.add({ f: () => { g.state.data.social.inboxAt = now() - 30 * 3600000; (g.social as unknown as { inboxT: number; first: boolean }).inboxT = 0; (g.social as unknown as { first: boolean }).first = true; } }, 'f').name('📬 模擬好友動態（過去 30 小時）');
+    soc.add({ f: () => { g.state.data.social.hearts += 50; } }, 'f').name('💗 +50 愛心');
+    soc.add({ f: () => { Object.assign(g.state.data.social, { day: '' }); } }, 'f').name('↺ 重置今日社交次數');
+    soc.close();
+
+    const perf = gui.addFolder('📊 效能');
+    const stat = { calls: 0, tris: 0, fps: 0 };
+    perf.add(stat, 'fps').name('FPS').listen().disable();
+    perf.add(stat, 'calls').name('Draw calls').listen().disable();
+    perf.add(stat, 'tris').name('三角形（千）').listen().disable();
+    let frames = 0, t0 = performance.now();
+    const loop = () => {
+      frames++;
+      const t = performance.now();
+      if (t - t0 > 1000) {
+        stat.fps = Math.round((frames * 1000) / (t - t0));
+        frames = 0; t0 = t;
+        const info = g.stage.renderer.info.render;
+        stat.calls = info.calls;
+        stat.tris = Math.round(info.triangles / 1000);
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+    perf.close();
+
+    const df = gui.addFolder('🗑 存檔');
+    df.add({ f: () => { if (confirm('確定要重設存檔？')) { g.state.reset(); localStorage.removeItem('happyFarm.save'); location.reload(); } } }, 'f').name('🗑 重設存檔');
     af.close();
 
     // ---- 寵物 ----
@@ -229,7 +292,7 @@ export class DevTools {
     const f = parent.addFolder(`目前：${g.isMobileLayout ? '手機版' : 'PC 版'}`);
     this.layoutFolder = f;
     const apply = () => { g.applyLayout(); this.persist(); };
-    const names: Record<HudKey, string> = { status: '等級列', wallet: '金幣與時間', toolbar: '種子工具列', bag: '背包與寵物鈕', queue: '動作佇列', toast: '提示訊息' };
+    const names: Record<HudKey, string> = { status: '等級列', wallet: '金幣與時間', toolbar: '種子工具列', bag: '背包與寵物鈕', queue: '動作佇列', toast: '提示訊息', event: '節慶橫幅' };
     for (const key of Object.keys(lay.hud) as HudKey[]) {
       const it = lay.hud[key];
       const sf = f.addFolder(names[key]);

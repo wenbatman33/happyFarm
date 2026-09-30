@@ -22,3 +22,12 @@ async function boot() {
 }
 
 void boot();
+
+// PWA：正式版註冊 Service Worker（離線可玩）；記下「安裝到主畫面」的提示事件給設定頁用
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => void navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[PWA] Service Worker 註冊失敗', e)));
+}
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  (window as unknown as { installPrompt: Event }).installPrompt = e;
+});

@@ -4,7 +4,7 @@ import type { SaveData } from '../systems/state';
 import type { Season } from '../core/clock';
 
 // 農場手帳：任務／季節手帳／圖鑑／成就
-export type JournalTab = 'tasks' | 'season' | 'almanac' | 'ach';
+export type JournalTab = string;
 
 export class JournalUI {
   private root: HTMLElement;
@@ -12,7 +12,11 @@ export class JournalUI {
   open = false;
   onClaimTask?: (id: string) => void;
   onClaimTier?: (i: number) => void;
+  onAction?: (a: string) => void;
+  // 其他系統加進來的分頁（印章卡、故事）
+  extra: Record<string, { label: string; render: () => string }> = {};
   private last = '';
+  private tabsKey = '';
 
   constructor() {
     this.root = document.createElement('div');
@@ -34,7 +38,9 @@ export class JournalUI {
       const ct = el.closest<HTMLElement>('[data-claim-task]');
       if (ct) { this.onClaimTask?.(ct.dataset.claimTask!); return; }
       const cr = el.closest<HTMLElement>('[data-claim-tier]');
-      if (cr) this.onClaimTier?.(Number(cr.dataset.claimTier));
+      if (cr) { this.onClaimTier?.(Number(cr.dataset.claimTier)); return; }
+      const a = el.closest<HTMLElement>('[data-a]');
+      if (a && !a.classList.contains('off')) this.onAction?.(a.dataset.a!);
     });
   }
 
@@ -52,11 +58,20 @@ export class JournalUI {
   render(d: SaveData, season: Season, now: number): void {
     if (!this.open) return;
     const p = d.prog;
+    // 補上其他系統的分頁按鈕
+    const key = Object.keys(this.extra).join(',');
+    if (key !== this.tabsKey) {
+      this.tabsKey = key;
+      const box = this.root.querySelector<HTMLElement>('.jn-tabs')!;
+      box.querySelectorAll('.jn-extra').forEach((b) => b.remove());
+      for (const [k, t] of Object.entries(this.extra)) box.insertAdjacentHTML('beforeend', `<button class="jn-extra" data-tab="${k}">${t.label}</button>`);
+    }
     this.root.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === this.tab));
     let html = '';
     if (this.tab === 'tasks') html = this.tasks(p, now);
     else if (this.tab === 'season') html = this.season(p, season);
     else if (this.tab === 'almanac') html = this.almanac(p);
+    else if (this.extra[this.tab]) html = this.extra[this.tab].render();
     else html = this.achievements(d);
     if (html === this.last) return;
     this.last = html;

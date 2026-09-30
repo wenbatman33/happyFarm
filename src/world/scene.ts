@@ -57,6 +57,9 @@ export class Stage {
   quality: Quality = 'high';
   glow = 0; // 夜間發光程度（窗戶、燈籠、螢火蟲）
   overcast = 0;
+  // 室內模式：不畫天空，改用固定的暖色室內光（窗戶斜射進來的光＋夜晚的燈）
+  indoor = false;
+  private indoorBg = new THREE.Color('#2a2019');
 
   // 鏡頭
   target = new THREE.Vector3(0, 0, -1);
@@ -155,7 +158,9 @@ export class Stage {
     this.quality = q;
     const dpr = window.devicePixelRatio || 1;
     this.renderer.setPixelRatio(q === 'high' ? Math.min(dpr, 2) : q === 'medium' ? Math.min(dpr, 1.5) : 1);
-    const size = q === 'low' ? 1024 : 2048;
+    // 低畫質：關掉即時陰影（draw call 幾乎減半），中畫質陰影貼圖降到 1024
+    this.renderer.shadowMap.enabled = q !== 'low';
+    const size = q === 'high' ? 2048 : 1024;
     if (this.sun.shadow.mapSize.x !== size) {
       this.sun.shadow.mapSize.set(size, size);
       this.sun.shadow.map?.dispose();
@@ -192,6 +197,9 @@ export class Stage {
   // 依時段、天氣套用光影
   applyLighting(hour: number, overcastGoal: number, tw: LightTweaks, dt: number): void {
     this.overcast = lerp(this.overcast, overcastGoal, 1 - Math.exp(-dt * 1.5));
+    this.sky.visible = !this.indoor;
+    this.scene.background = this.indoor ? this.indoorBg : null;
+    if (this.indoor) { this.indoorLighting(hour, tw); return; }
     let i = 0;
     while (i < KEYS.length - 2 && hour >= KEYS[i + 1].h) i++;
     const a = KEYS[i], b = KEYS[i + 1];
@@ -230,6 +238,32 @@ export class Stage {
     this.bloom.strength = tw.bloomStrength + this.glow * 0.25;
     this.bloom.threshold = tw.bloomThreshold;
     this.vignette.uniforms.uStrength.value = tw.vignette;
+  }
+
+  private indoorLighting(hour: number, tw: LightTweaks) {
+    // 白天：窗戶（左側）照進來的暖陽；晚上：月光很淡，主要靠室內燈（由 Interior 自己加的點光源）
+    let i = 0;
+    while (i < KEYS.length - 2 && hour >= KEYS[i + 1].h) i++;
+    const a = KEYS[i], b = KEYS[i + 1];
+    const t = clamp((hour - a.h) / (b.h - a.h), 0, 1);
+    this.glow = lerp(a.glow, b.glow, t);
+    const day = 1 - this.glow;
+    this.sun.color.set(day > 0.5 ? '#ffe2b8' : '#9fb4ff');
+    this.sun.intensity = (0.5 + 1.9 * day) * tw.sunMul;
+    this.sun.position.copy(this.target).add(new THREE.Vector3(-18, 22, 14));
+    this.sun.target.position.copy(this.target);
+    this.hemi.color.set('#ffe9cc');
+    this.hemi.groundColor.set('#6a4a32');
+    this.hemi.intensity = (0.55 + 0.35 * day) * tw.hemiMul;
+    this.fill.intensity = 0.2;
+    this.fog.near = 200;
+    this.fog.far = 400;
+    this.renderer.toneMappingExposure = tw.exposure;
+    this.aoPass.configuration.intensity = tw.aoIntensity;
+    this.aoPass.configuration.aoRadius = tw.aoRadius;
+    this.bloom.strength = tw.bloomStrength + this.glow * 0.2;
+    this.bloom.threshold = tw.bloomThreshold;
+    this.vignette.uniforms.uStrength.value = tw.vignette + 0.08;
   }
 
   updateCamera(focus: THREE.Vector3, dt: number): void {

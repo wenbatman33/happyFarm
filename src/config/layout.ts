@@ -2,7 +2,7 @@
 // 調好後按「💾 匯出」，再把 JSON 寫回本檔。
 
 export type Anchor = 'tl' | 'tr' | 'bl' | 'br' | 'tc' | 'bc';
-export type HudKey = 'status' | 'wallet' | 'toolbar' | 'bag' | 'queue' | 'toast';
+export type HudKey = 'status' | 'wallet' | 'toolbar' | 'bag' | 'queue' | 'toast' | 'event';
 
 export interface HudItem {
   anchor: Anchor;
@@ -40,6 +40,7 @@ export const LAYOUT_PC: Layout = {
     bag: item('br', 18, 18, 1, 13),
     queue: item('bc', 0, 112, 1, 18),
     toast: item('tc', 0, 90, 1, 16, '#ffffff'),
+    event: item('tc', 0, 16, 1, 14),
   },
   camera: { fov: 30, dist: 27, distMin: 12, distMax: 38, pitch: 50, followDamp: 4, lookAhead: 1.8 },
 };
@@ -51,7 +52,8 @@ export const LAYOUT_MOBILE: Layout = {
     toolbar: item('bc', 0, 12, 0.92, 12),
     bag: item('br', 10, 96, 0.9, 12),
     queue: item('bc', 0, 100, 0.9, 16),
-    toast: item('tc', 0, 76, 0.95, 14, '#ffffff'),
+    toast: item('tc', 0, 110, 0.95, 14, '#ffffff'),
+    event: item('tl', 10, 64, 0.84, 12),
   },
   camera: { fov: 34, dist: 33, distMin: 14, distMax: 44, pitch: 54, followDamp: 4, lookAhead: 0.4 },
 };
@@ -67,6 +69,8 @@ export interface SceneLayout {
   compost: PropPlacement;
   ranch: PropPlacement; // 牧場柵欄中心（外框 6×5 公尺，東側開門）
   workshop: PropPlacement; // 加工坊（Lv15）
+  greenhouse: PropPlacement; // 溫室（Lv40）中心；外框 x±4.5、z±2.5，南側中央開門
+  market: PropPlacement; // 週末市集／流浪商人攤位（面向小徑）
   trees: PropPlacement[];
   rocks: PropPlacement[];
 }
@@ -81,7 +85,9 @@ export const SCENE_LAYOUT: SceneLayout = {
   compost: p(-4.6, -0.8, 0.2),
   ranch: p(-8, 4.5),
   workshop: p(5.6, -5.4),
-  trees: [p(-9, -9, 0, 1.25), p(4.2, -11.8, 0.8, 1.05), p(-12.4, 0.8, 1.2, 1.15), p(11, 7, 2.1, 1.3), p(-8, 10, 0.3, 0.95), p(8.5, 11, 1.7, 1.05), p(-12, -4, 2.5, 1), p(12, -3, 0.9, 0.9)],
+  greenhouse: p(-8, -11),
+  market: p(-3.4, 9.4, Math.PI / 2),
+  trees: [p(-1.8, -11.9, 0, 1.2), p(4.2, -11.8, 0.8, 1.05), p(-12.4, 0.8, 1.2, 1.15), p(11, 7, 2.1, 1.3), p(-8, 10, 0.3, 0.95), p(8.5, 11, 1.7, 1.05), p(-12, -4, 2.5, 1), p(12, -3, 0.9, 0.9)],
   rocks: [p(-3.5, 6, 0.3, 1), p(6, -2, 1.2, 0.8), p(-9.6, 8.8, 2, 1.2), p(10, 2, 0.5, 0.9), p(-2, 11, 1.1, 0.7)],
 };
 

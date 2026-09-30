@@ -1,5 +1,8 @@
 // 數值公式：唯一來源是 docs/06-成長曲線與經濟.md
 
+// 等級上限（docs/06：1–100 級）
+export const LEVEL_CAP = 100;
+
 // 升到下一級所需 XP
 export const xpNext = (level: number): number => Math.ceil(300 + 42 * Math.pow(level, 1.72));
 
@@ -44,10 +47,80 @@ export const COMPOST_SLOTS = 3;
 // 房屋修繕 T2（03 §2）
 export const HOUSE_T2 = { level: 8, coins: 3000, wood: 20, ms: 3600000 };
 // 各階段升級條件（升到該階段）
-export const HOUSE_TIERS: Record<number, { level: number; coins: number; wood: number; stone: number; ms: number; name: string }> = {
+// crafted：任意加工品的數量；parts：風車零件（加工坊製作）
+export const HOUSE_TIERS: Record<number, { level: number; coins: number; wood: number; stone: number; ms: number; name: string; crafted?: number; parts?: number }> = {
   2: { level: 8, coins: 3000, wood: 20, stone: 0, ms: 3600000, name: '修繕小木屋' },
   3: { level: 25, coins: 40000, wood: 80, stone: 40, ms: 8 * 3600000, name: '紅頂農舍' },
+  4: { level: 50, coins: 150000, wood: 200, stone: 150, ms: 24 * 3600000, name: '雙層農莊', crafted: 30 },
+  5: { level: 80, coins: 400000, wood: 400, stone: 300, ms: 72 * 3600000, name: '風車莊園', parts: 5 },
 };
+
+// 溫室（docs/03 §1）：任何季節都能種任何作物，成長時間 ×1.5；分三期擴建
+export const GREENHOUSE_GROWTH = 1.5;
+export const GREENHOUSE: { level: number; coins: number; wood: number; stone: number; ms: number; plots: number }[] = [
+  { level: 40, coins: 30000, wood: 40, stone: 40, ms: 2 * 3600000, plots: 6 },
+  { level: 55, coins: 90000, wood: 80, stone: 60, ms: 6 * 3600000, plots: 12 },
+  { level: 70, coins: 200000, wood: 120, stone: 120, ms: 12 * 3600000, plots: 18 },
+];
+
+// 工具升級（docs/03 §4.4、§5）：木匠老木的工具箱
+export interface ToolTier { name: string; level: number; coins: number; wood?: number; stone?: number; desc: string }
+export const TOOLS: Record<'can' | 'hoe' | 'sickle' | 'pick' | 'axe' | 'robot', { name: string; emoji: string; tiers: ToolTier[] }> = {
+  can: { name: '澆水壺', emoji: '🚿', tiers: [
+    { name: '木水壺', level: 1, coins: 0, desc: '一次澆 1 塊田' },
+    { name: '銅水壺', level: 12, coins: 2000, stone: 10, desc: '一次澆一排 3 塊' },
+    { name: '金水壺', level: 30, coins: 20000, stone: 40, desc: '一次澆 3×3 共 9 塊' },
+  ] },
+  hoe: { name: '鋤頭', emoji: '⛏️', tiers: [
+    { name: '舊鋤頭', level: 1, coins: 0, desc: '一次翻 1 塊田' },
+    { name: '銅鋤頭', level: 10, coins: 1500, wood: 10, desc: '一次翻一排 3 塊' },
+    { name: '金鋤頭', level: 28, coins: 15000, wood: 30, stone: 20, desc: '一次翻 3×3 共 9 塊' },
+  ] },
+  sickle: { name: '鐮刀', emoji: '🔪', tiers: [
+    { name: '徒手', level: 1, coins: 0, desc: '一次拔 1 株' },
+    { name: '小鐮刀', level: 6, coins: 0, desc: '前方扇形 1.3 m，一次 3 株（Lv6 自動拿到）' },
+    { name: '大鐮刀', level: 20, coins: 5000, wood: 15, desc: '前方扇形 2 m，一次 6 株，連大草叢都一刀' },
+  ] },
+  pick: { name: '鎬', emoji: '⛏️', tiers: [
+    { name: '鐵鎬', level: 1, coins: 0, desc: '大石頭要敲 3 下' },
+    { name: '鋼鎬', level: 15, coins: 3000, wood: 10, desc: '每下威力 ×2' },
+    { name: '金鎬', level: 35, coins: 25000, wood: 20, desc: '什麼石頭都一下碎' },
+  ] },
+  axe: { name: '斧頭', emoji: '🪓', tiers: [
+    { name: '鐵斧', level: 1, coins: 0, desc: '樹樁要砍 3 下' },
+    { name: '鋼斧', level: 15, coins: 3000, stone: 10, desc: '每下威力 ×2' },
+    { name: '金斧', level: 35, coins: 25000, stone: 20, desc: '什麼木頭都一下斷' },
+  ] },
+  robot: { name: '除草小機器人', emoji: '🤖', tiers: [
+    { name: '還沒有', level: 1, coins: 0, desc: '' },
+    { name: '除草小機器人', level: 75, coins: 80000, stone: 60, desc: '每小時自動清 5 株普通雜草（稀有草和季節雜草留給你親手拔）' },
+  ] },
+};
+export const ROBOT_PER_HOUR = 5;
+
+// 月份主題（docs/05 §4.3）
+export const MONTH_THEME: Record<number, { name: string; desc: string; harvestXp?: number; craftTime?: number; weedXp?: number; orderCoins?: number; bond?: number }> = {
+  1: { name: '新年新希望', desc: '訂單金幣 +10%', orderCoins: 1.1 },
+  2: { name: '團圓月', desc: '摸寵物親密度 +50%', bond: 1.5 },
+  3: { name: '播種月', desc: '收成 XP +10%', harvestXp: 1.1 },
+  4: { name: '花漾月', desc: '拔草 XP +20%', weedXp: 1.2 },
+  5: { name: '感恩月', desc: '訂單金幣 +10%', orderCoins: 1.1 },
+  6: { name: '盛夏月', desc: '加工時間 −15%', craftTime: 0.85 },
+  7: { name: '西瓜月', desc: '收成 XP +10%', harvestXp: 1.1 },
+  8: { name: '星空月', desc: '摸寵物親密度 +50%', bond: 1.5 },
+  9: { name: '月圓月', desc: '拔草 XP +20%', weedXp: 1.2 },
+  10: { name: '豐收月', desc: '收成 XP +10%', harvestXp: 1.1 },
+  11: { name: '市集月', desc: '訂單金幣 +10%', orderCoins: 1.1 },
+  12: { name: '暖冬月', desc: '加工時間 −20%', craftTime: 0.8 },
+};
+
+// 月曆印章卡（docs/05 §4.1）：當月登入 10 天小獎、20 天換當月限定家具（不需要連續）
+export const STAMP_SMALL = 10;
+export const STAMP_BIG = 20;
+
+// 回流保護（docs/05 §6）
+export const CATCHUP_DAYS = 7;
+export const CATCHUP_MULT = 1.5;
 
 export const nextPlotUnlockLevel = (level: number): number | null => {
   for (const [lv] of PLOT_TABLE) if (lv > level) return lv;

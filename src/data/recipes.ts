@@ -15,6 +15,18 @@ const RAW: [string, string, string, [string, number][], number][] = [
   ['soup', '香菇湯', '🍲', [['shiitake', 2], ['onion', 1]], 19],
   ['bread', '麵包', '🍞', [['flour', 2], ['sugarcane', 1]], 20],
   ['cheese', '起司', '🧀', [['milk', 3]], 22],
+  // M4：春夏作物與節慶的配方
+  ['ketchup', '番茄醬', '🥫', [['tomato', 4]], 16],
+  ['pickles', '醃黃瓜', '🥒', [['cucumber', 4]], 17],
+  ['mooncake', '月餅', '🥮', [['sweetpotato', 2], ['flour', 1]], 18],
+  ['popcorn', '爆米花', '🍿', [['corn', 3]], 18],
+  ['teacan', '春茶罐', '🍵', [['tea', 3]], 22],
+  ['blueberryjam', '藍莓果醬', '🫙', [['blueberry', 4]], 22],
+  ['pumpkinpie', '南瓜派', '🥧', [['pumpkin', 1], ['flour', 2]], 26],
+  ['lavendersoap', '薰衣草皂', '🧼', [['lavender', 2], ['butter', 1]], 35],
+  ['tangyuan', '湯圓', '🍡', [['rice', 2], ['sugarcane', 1]], 36],
+  // 房屋 T5 要用的風車零件（木材＋石材）
+  ['windpart', '風車零件', '⚙️', [['wood', 10], ['stone', 10]], 60],
 ];
 
 export const RECIPES: Recipe[] = [];
@@ -36,6 +48,9 @@ for (const [id, name, emoji, inputs, unlock] of RAW) {
   RECIPES.push(r);
   RECIPE_BY_ID[id] = r;
 }
+
+// 風車零件不是食物：固定 4 小時、價值另外算
+Object.assign(RECIPE_BY_ID.windpart, { minutes: 240, sell: 800, xp: 60 });
 
 export const WORKSHOP_LEVEL = 15;
 export const workshopSlots = (level: number): number => (level >= 70 ? 6 : level >= 40 ? 4 : 2);

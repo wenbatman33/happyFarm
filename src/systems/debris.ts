@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { bakeGroup } from '../world/bake';
 import { dayKey } from '../core/clock';
 import { hashStr, mulberry32 } from '../core/rng';
 import { DEBRIS, DEBRIS_DAILY, DEBRIS_WILD_CAP, type DebrisKind } from '../data/economy';
@@ -96,6 +97,7 @@ function buildDebris(kind: DebrisKind, seed: number): THREE.Group {
     }
   }
   g.rotation.y = rand() * Math.PI * 2;
+  bakeGroup(body); // 效能：同材質零件合併
   return g;
 }
 

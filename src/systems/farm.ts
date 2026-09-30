@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { PropPlacement } from '../config/layout';
 import { CROP_BY_ID, type CropDef } from '../data/crops';
-import { plotPrice, plotsForLevel, rollQuality, type Quality } from '../data/economy';
+import { GREENHOUSE, GREENHOUSE_GROWTH, plotPrice, plotsForLevel, rollQuality, type Quality } from '../data/economy';
 import { easeOutBack } from '../core/rng';
 import { buildCrop } from '../world/crops3d';
+import { bakeGroup } from '../world/bake';
 import { GEO, mat, mesh } from '../world/materials';
 import type { GameState, PlotSave } from './state';
 
@@ -24,6 +25,15 @@ export const UNLOCK_ORDER: number[] = (() => {
   return out;
 })();
 export const STARTER_PLOTS = 6;
+
+// 溫室田：接在田區 30 格後面，共 18 格；座標相對於溫室中心（中間 x=0 那一排是走道）
+export const GH_COUNT = 18;
+export const GH_OFFSETS: [number, number][] = [
+  [-3, 0], [-2, 0], [-1, 0], [-3, 1], [-2, 1], [-1, 1], // 第一期
+  [1, 0], [2, 0], [3, 0], [1, 1], [2, 1], [3, 1], // 第二期
+  [-3, -1], [-2, -1], [-1, -1], [1, -1], [2, -1], [3, -1], // 第三期
+];
+export const ghPlotsFor = (level: number): number => (level <= 0 ? 0 : GREENHOUSE[Math.min(level, GREENHOUSE.length) - 1].plots);
 
 const DRY_RATE = 0.6;
 const soilGeo = new RoundedBoxGeometry(0.92, 0.16, 0.92, 2, 0.06);
@@ -82,6 +92,15 @@ interface PlotView {
   wet: boolean;
 }
 
+// 作物模型快取：同一種作物、同一個階段只建一次（零件依材質合併），之後直接複製（共用幾何）
+const cropCache = new Map<string, THREE.Group>();
+function cropModel(d: CropDef, stage: number): THREE.Group {
+  const k = `${d.id}:${stage}`;
+  let c = cropCache.get(k);
+  if (!c) { c = buildCrop(d, stage); bakeGroup(c); cropCache.set(k, c); }
+  return c.clone();
+}
+
 export type PlotStatus = 'locked' | 'debris' | 'forsale' | 'grass' | 'tilled' | 'growing' | 'dry' | 'mature' | 'giantpart';
 
 // 夜間花只在 19:00–05:00 生長：算 [a, b] 與每晚夜間時段的重疊毫秒數
@@ -103,33 +122,64 @@ export class Farm {
   private views: PlotView[] = [];
   queued = new Set<number>();
   hasDebris: (i: number) => boolean = () => false;
+  showSigns = true; // 拜訪好友時不顯示買地的價格牌
 
-  constructor(parent: THREE.Object3D, private state: GameState, private place: PropPlacement) {
+  constructor(parent: THREE.Object3D, private state: GameState, private place: PropPlacement, private gh?: PropPlacement) {
     parent.add(this.root);
-    for (let i = 0; i < FIELD_COUNT; i++) this.views.push(this.makeView());
+    for (let i = 0; i < FIELD_COUNT + GH_COUNT; i++) this.views.push(this.makeView());
     this.reposition();
   }
 
-  get count(): number { return FIELD_COUNT; }
+  get count(): number { return FIELD_COUNT + GH_COUNT; }
+
+  isGH(i: number): boolean { return i >= FIELD_COUNT; }
 
   tileOf(i: number): { x: number; z: number } {
+    if (i >= FIELD_COUNT) {
+      const [dx, dz] = GH_OFFSETS[i - FIELD_COUNT];
+      return { x: (this.gh?.x ?? 0) + dx, z: (this.gh?.z ?? 0) + dz };
+    }
     return { x: this.place.x + (i % FIELD_COLS), z: this.place.z + Math.floor(i / FIELD_COLS) };
   }
 
   indexAt(tx: number, tz: number): number {
     const c = tx - this.place.x, r = tz - this.place.z;
-    if (c < 0 || c >= FIELD_COLS || r < 0 || r >= FIELD_ROWS) return -1;
-    return r * FIELD_COLS + c;
+    if (c >= 0 && c < FIELD_COLS && r >= 0 && r < FIELD_ROWS) return r * FIELD_COLS + c;
+    if (this.gh) {
+      const k = GH_OFFSETS.findIndex(([dx, dz]) => this.gh!.x + dx === tx && this.gh!.z + dz === tz);
+      if (k >= 0 && k < ghPlotsFor(this.state.data.greenhouse?.level ?? 0)) return FIELD_COUNT + k;
+    }
+    return -1;
+  }
+
+  // 玩家在溫室裡（決定工具列顯示全季種子）
+  inGreenhouse(x: number, z: number): boolean {
+    if (!this.gh || (this.state.data.greenhouse?.level ?? 0) < 1) return false;
+    return Math.abs(x - this.gh.x) < 3.6 && Math.abs(z - this.gh.z) < 1.7;
   }
 
   rank(i: number): number { return UNLOCK_ORDER.indexOf(i); }
   owned(i: number): boolean { return this.plot(i).owned; }
-  get ownedCount(): number { return this.state.data.plots.filter((p) => p.owned).length; }
-  // 目前等級可以擁有幾塊
-  canOwn(i: number): boolean { return this.rank(i) < plotsForLevel(this.state.data.level); }
+  get ownedCount(): number { return this.state.data.plots.filter((p, i) => p.owned && i < FIELD_COUNT).length; }
+  // 目前等級可以擁有幾塊（溫室田由溫室等級決定）
+  canOwn(i: number): boolean {
+    if (i >= FIELD_COUNT) return i - FIELD_COUNT < ghPlotsFor(this.state.data.greenhouse?.level ?? 0);
+    return this.rank(i) < plotsForLevel(this.state.data.level);
+  }
   nextPrice(): number { return plotPrice(this.ownedCount + 1); }
   // 還可以買幾塊（等級上限內、尚未擁有）
-  get buyable(): number { return this.state.data.plots.filter((p, i) => !p.owned && this.canOwn(i)).length; }
+  get buyable(): number { return this.state.data.plots.filter((p, i) => i < FIELD_COUNT && !p.owned && this.canOwn(i)).length; }
+
+  // 溫室擴建完成：新的溫室田直接給你，而且土已經翻好
+  grantGreenhouse(level: number, now: number): void {
+    for (let k = 0; k < ghPlotsFor(level); k++) {
+      const p = this.plot(FIELD_COUNT + k);
+      if (!p.owned) Object.assign(p, { owned: true, tilled: true, cropId: null, p0: 0, snapAt: now, wetUntil: 0, fert: false });
+    }
+  }
+
+  // 成長需要的毫秒（溫室 ×1.5）
+  growMs(i: number, d: CropDef): number { return d.minutes * 60000 * (this.isGH(i) ? GREENHOUSE_GROWTH : 1); }
 
   unlockLevel(i: number): number {
     const rank = this.rank(i);
@@ -159,6 +209,7 @@ export class Farm {
       fert.add(d);
     }
     fert.visible = false;
+    bakeGroup(fert);
     const sign = new THREE.Group();
     const post = mesh(GEO.cyl, MAT.sign);
     post.scale.set(0.05, 0.4, 0.05);
@@ -166,6 +217,7 @@ export class Farm {
     const board = mesh(new RoundedBoxGeometry(0.34, 0.22, 0.04, 1, 0.02), MAT.sign);
     board.position.y = 0.42;
     sign.add(post, board);
+    bakeGroup(sign);
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ depthWrite: false }));
     label.scale.set(0.62, 0.25, 1);
     label.position.set(0, 0.78, 0);
@@ -201,7 +253,7 @@ export class Farm {
     const span = d.night ? nightMs(p.snapAt, now) : Math.max(0, now - p.snapAt);
     const wet = d.night ? nightMs(p.snapAt, Math.min(now, p.wetUntil)) : Math.max(0, Math.min(now, p.wetUntil) - p.snapAt);
     const eff = wet + (span - wet) * DRY_RATE;
-    return Math.min(1, p.p0 + eff / (d.minutes * 60000));
+    return Math.min(1, p.p0 + eff / this.growMs(i, d));
   }
 
   stageOf(prog: number): number {
@@ -244,6 +296,7 @@ export class Farm {
 
   // 巨型作物：以 root 為左上角的 3×3，全部是自己的、翻好土、空著
   giantBlock(root: number): number[] | null {
+    if (root >= FIELD_COUNT) return null;
     const c = root % FIELD_COLS, r = Math.floor(root / FIELD_COLS);
     if (c > FIELD_COLS - 3 || r > FIELD_ROWS - 3) return null;
     const out: number[] = [];
@@ -270,7 +323,7 @@ export class Farm {
     p.p0 = this.progress(i, now);
     p.snapAt = now;
     // 澆一次維持「成長時間的一半」，最少 2 分鐘、最多 6 小時
-    const dur = d ? Math.min(6 * 3600000, Math.max(120000, d.minutes * 60000 * 0.5)) : 120000;
+    const dur = d ? Math.min(6 * 3600000, Math.max(120000, this.growMs(i, d) * 0.5)) : 120000;
     p.wetUntil = now + dur;
   }
 
@@ -303,14 +356,19 @@ export class Farm {
       const p = this.plot(i);
       const st = this.status(i, now);
       const own = p.owned;
-      if (raining && own && p.cropId && p.wetUntil < now + 30000) this.water(i, now);
-      v.sign.visible = st === 'locked' || st === 'forsale';
+      // 溫室田：沒擴建到的不顯示；溫室有自動灑水，永遠不會乾
+      if (i >= FIELD_COUNT) {
+        v.group.visible = own;
+        if (!own) return;
+        if (p.cropId && p.wetUntil < now + 30000) this.water(i, now);
+      } else if (raining && own && p.cropId && p.wetUntil < now + 30000) this.water(i, now);
+      v.sign.visible = this.showSigns && (st === 'locked' || st === 'forsale');
       v.grass.material = own ? MAT.plot : st === 'locked' ? MAT.locked : MAT.sale;
       v.grass.visible = !p.tilled || !own;
       v.soil.visible = p.tilled && own;
       v.fert.visible = own && p.fert && !!p.cropId;
       // 標籤：未解鎖顯示等級、可購買顯示價格
-      const key = st === 'locked' ? `Lv${this.unlockLevel(i)}` : st === 'forsale' ? `🪙${price}` : '';
+      const key = !this.showSigns ? '' : st === 'locked' ? `Lv${this.unlockLevel(i)}` : st === 'forsale' ? `🪙${price}` : '';
       if (key !== v.labelKey) {
         v.labelKey = key;
         v.label.visible = !!key;
@@ -334,7 +392,7 @@ export class Farm {
         if (v.crop) v.group.remove(v.crop);
         v.crop = null;
         if (d && stage >= 0) {
-          v.crop = buildCrop(d, stage);
+          v.crop = cropModel(d, stage);
           v.crop.position.set(d.giant ? 1 : 0, 0.14, d.giant ? 1 : 0); // 巨型作物長在 3×3 的正中央
           v.crop.rotation.y = (i * 1.7) % (Math.PI * 2);
           v.group.add(v.crop);

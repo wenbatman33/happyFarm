@@ -333,6 +333,73 @@ function makeBandana(): THREE.Group {
   return g;
 }
 
+// 節慶寵物配件（節慶商店兌換）
+function makeFestiveHat(kind: string): { obj: THREE.Group; neck: boolean } {
+  const g = new THREE.Group();
+  const m = (c: string, o: THREE.MeshStandardMaterialParameters = {}) => mat(c, { roughness: 0.6, ...o });
+  switch (kind) {
+    case 'pethat_party': {
+      const cone = mesh(GEO.cone, m('#6a7cff')); cone.scale.set(0.16, 0.3, 0.16); cone.position.y = 0.14;
+      const pom = mesh(GEO.sphereLo, m('#ffd84a')); pom.scale.setScalar(0.08); pom.position.y = 0.3;
+      for (let i = 0; i < 3; i++) { const dot = mesh(GEO.sphereLo, m(['#ff6a8a', '#6ad8a0', '#ffffff'][i]), false); dot.scale.setScalar(0.035); dot.position.set(Math.cos(i * 2.1) * 0.08, 0.08 + i * 0.05, Math.sin(i * 2.1) * 0.08); g.add(dot); }
+      g.add(cone, pom);
+      g.rotation.z = 0.25;
+      return { obj: g, neck: false };
+    }
+    case 'pethat_fortune': {
+      const red = m('#d8342c'), gold = m('#ffcf4a', { metalness: 0.3, roughness: 0.35 });
+      const cap = mesh(GEO.sphere, red); cap.scale.set(0.24, 0.13, 0.22); cap.position.y = 0.04;
+      const band = mesh(GEO.cyl, gold); band.scale.set(0.25, 0.04, 0.23); band.position.y = 0.0;
+      const coin = mesh(GEO.cyl, gold); coin.scale.set(0.07, 0.015, 0.07); coin.rotation.x = Math.PI / 2; coin.position.set(0, 0.06, 0.2);
+      for (const sx of [-1, 1]) { const w = mesh(GEO.sphereLo, red); w.scale.set(0.12, 0.03, 0.05); w.position.set(sx * 0.24, 0.05, -0.04); g.add(w); }
+      g.add(cap, band, coin);
+      return { obj: g, neck: false };
+    }
+    case 'pethat_flower': {
+      const ring = mesh(new THREE.TorusGeometry(0.15, 0.025, 6, 18), m('#5aa84a')); ring.rotation.x = Math.PI / 2;
+      g.add(ring);
+      const cols = ['#ff8ab8', '#ffd84a', '#ffffff', '#b28cff', '#ff9a4a', '#ff8ab8', '#ffffff'];
+      cols.forEach((c, i) => { const f = mesh(GEO.sphereLo, m(c)); f.scale.set(0.07, 0.04, 0.07); const a = (i / cols.length) * Math.PI * 2; f.position.set(Math.cos(a) * 0.15, 0.02, Math.sin(a) * 0.15); g.add(f); });
+      g.position.y = 0.02;
+      return { obj: g, neck: false };
+    }
+    case 'pethat_sachet': {
+      const cord = mesh(new THREE.TorusGeometry(0.14, 0.015, 6, 18), m('#e8504a')); cord.rotation.x = Math.PI / 2 - 0.4;
+      const bag = mesh(GEO.sphere, m('#3faa6a')); bag.scale.set(0.1, 0.12, 0.06); bag.position.set(0, -0.1, 0.12);
+      const tassel = mesh(GEO.cyl, m('#ffcf4a')); tassel.scale.set(0.015, 0.08, 0.015); tassel.position.set(0, -0.2, 0.12);
+      g.add(cord, bag, tassel);
+      return { obj: g, neck: true };
+    }
+    case 'pethat_pomelo': {
+      // 中秋柚子帽：半顆柚子皮倒扣在頭上
+      const peel = mesh(new THREE.SphereGeometry(0.2, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), m('#b8d85a', { side: THREE.DoubleSide }));
+      peel.scale.set(1.1, 0.8, 1.1);
+      const inner = mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.02, 16), m('#fff4d8')); inner.position.y = 0.0;
+      const stem = mesh(GEO.cyl, m('#5a8a3a')); stem.scale.set(0.02, 0.07, 0.02); stem.position.y = 0.18;
+      const leaf = mesh(GEO.sphereLo, m('#4f9e3a')); leaf.scale.set(0.08, 0.015, 0.05); leaf.position.set(0.05, 0.2, 0);
+      g.add(peel, inner, stem, leaf);
+      return { obj: g, neck: false };
+    }
+    case 'pethat_witch': {
+      const purple = m('#5a3a8a');
+      const brim = mesh(GEO.cyl, purple); brim.scale.set(0.34, 0.02, 0.34);
+      const cone = mesh(GEO.cone, purple); cone.scale.set(0.18, 0.36, 0.18); cone.position.y = 0.18; cone.rotation.z = -0.2;
+      const band = mesh(GEO.cyl, m('#ff9a2a')); band.scale.set(0.19, 0.04, 0.19); band.position.y = 0.03;
+      g.add(brim, cone, band);
+      return { obj: g, neck: false };
+    }
+    case 'pethat_santa': {
+      const red = m('#d8342c'), white = m('#ffffff', { roughness: 0.9 });
+      const cone = mesh(GEO.cone, red); cone.scale.set(0.2, 0.3, 0.2); cone.position.set(0, 0.15, 0); cone.rotation.z = -0.5;
+      const rim = mesh(new THREE.TorusGeometry(0.19, 0.045, 8, 20), white); rim.rotation.x = Math.PI / 2;
+      const pom = mesh(GEO.sphereLo, white); pom.scale.setScalar(0.09); pom.position.set(0.13, 0.26, 0);
+      g.add(cone, rim, pom);
+      return { obj: g, neck: false };
+    }
+  }
+  return { obj: g, neck: false };
+}
+
 export class Pet {
   root = new THREE.Group();
   mover: Mover;
@@ -351,6 +418,7 @@ export class Pet {
   private growT = 1; // 成長過場動畫進度
   private fromStage = 2;
   private hatObj: THREE.Object3D | null = null;
+  private festive: { kind: string; obj: THREE.Object3D; neck: boolean } | null = null;
   private bandanaObj: THREE.Object3D | null = null;
   private digTarget: { id: string; x: number; z: number } | null = null;
   private task: { x: number; z: number; anim: PetAnim; dur: number; onDone: () => void; arrived: boolean } | null = null;
@@ -378,6 +446,17 @@ export class Pet {
     this.scaler.add(this.rig.body);
     this.hatObj = this.bandanaObj = null;
     this.applyGrowth(this.stage, true);
+    if (this.festive) { const k = this.festive.kind; this.festive = null; this.setFestiveHat(k); }
+  }
+
+  // 節慶配件：戴帽子時先把草帽收起來
+  setFestiveHat(kind: string): void {
+    if (this.festive) { this.festive.obj.parent?.remove(this.festive.obj); this.festive = null; }
+    if (this.hatObj) this.hatObj.visible = !kind || kind === 'pethat_sachet';
+    if (!kind) return;
+    const h = makeFestiveHat(kind);
+    (h.neck ? this.rig.neck : this.rig.hat).add(h.obj);
+    this.festive = { kind, obj: h.obj, neck: h.neck };
   }
 
   // 成長階段（0 幼年、1 少年、2 成年）；instant=false 時播成長過場
@@ -398,8 +477,10 @@ export class Pet {
     this.rig.eyes.forEach((ey) => { ey.scale.x = ey.scale.z = lerp(a.eye, b.eye, e); });
   }
 
+  setGrid(g: Grid): void { this.mover.grid = g; }
+
   setAccessories(hat: boolean, bandana: boolean): void {
-    if (hat && !this.hatObj) { this.hatObj = makeHat(); this.rig.hat.add(this.hatObj); }
+    if (hat && !this.hatObj) { this.hatObj = makeHat(); this.rig.hat.add(this.hatObj); this.hatObj.visible = !this.festive || this.festive.neck; }
     if (!hat && this.hatObj) { this.rig.hat.remove(this.hatObj); this.hatObj = null; }
     if (bandana && !this.bandanaObj) { this.bandanaObj = makeBandana(); this.rig.neck.add(this.bandanaObj); }
     if (!bandana && this.bandanaObj) { this.rig.neck.remove(this.bandanaObj); this.bandanaObj = null; }

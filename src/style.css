@@ -45,6 +45,7 @@ body.onboarding #hud, body.onboarding #dev-gear { display: none; }
 .icon-btn { padding: 6px 10px; }
 @media (max-width: 480px) {
   .wd { display: none; }
+  .pill.mute { display: none; } /* 手機版音效開關收進設定頁 */
   .stat-col { min-width: 7.5em; }
   .pill { padding: 5px 10px; gap: 4px; }
   [data-hud='wallet'] { gap: 5px; }
@@ -258,3 +259,103 @@ body.dev-drag .hud-el * { pointer-events: none; }
 .ws-info small { color: var(--ink-soft); font-weight: 700; }
 .ws-in { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; font-weight: 700; color: #c0503a; margin-top: 2px; }
 .ws-in .ok { color: #4d9a2e; }
+
+/* ---------- M3 第二批／M4／M5 ---------- */
+#fade { position: fixed; inset: 0; background: #1a120c; opacity: 0; pointer-events: none; z-index: 45; transition: opacity 0.3s; }
+#fade.on { opacity: 1; }
+.sheet-card .sh-body { overflow-y: auto; padding-right: 4px; }
+.ws-recipe.done { opacity: 0.6; }
+.ws-in2 { font-size: 12px; font-weight: 700; color: var(--ink-soft); line-height: 1.45; margin-top: 2px; }
+.ws-in2 .ok { color: #4d9a2e; }
+.ws-in2 b { color: var(--ink); }
+
+/* 室內 */
+body.indoor [data-hud='toolbar'], body.indoor [data-hud='queue'], body.indoor .mow-btn, body.indoor .fr-btn,
+body.visiting [data-hud='toolbar'], body.visiting .mow-btn, body.visiting .fr-btn, body.visiting [data-hud='event'] { display: none !important; }
+#indoor-bar, #visit-bar { position: fixed; left: 50%; top: calc(74px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 9; background: rgba(255, 248, 234, 0.95); border-radius: 22px; box-shadow: var(--shadow); padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; max-width: 94vw; }
+.ib-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.ib-tabs button { background: #fff; border-radius: 12px; padding: 6px 10px; font-weight: 800; font-size: 13px; box-shadow: inset 0 -3px 0 #ecdcc0; }
+.ib-tabs button.on { background: #fff4c9; box-shadow: inset 0 -3px 0 #f0d27a, 0 0 0 2px var(--gold); }
+.ib-comfort { font-weight: 700; font-size: 13px; }
+.ib-comfort small { color: #c0503a; }
+.ib-btns, .vb-btns { display: flex; gap: 6px; }
+#furn-tray { position: fixed; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 12; width: min(760px, 96vw); background: rgba(255, 248, 234, 0.96); border-radius: 22px; box-shadow: var(--shadow); padding: 8px 10px; }
+.ft-hint { font-size: 12px; font-weight: 700; color: var(--ink-soft); padding: 0 4px 6px; }
+.ft-row { display: flex; gap: 8px; align-items: stretch; }
+.ft-list { flex: 1; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; min-height: 70px; }
+.ft-list::-webkit-scrollbar { display: none; }
+.ft-item { position: relative; flex: 0 0 auto; width: 70px; background: #fff; border-radius: 14px; padding: 6px 4px; display: flex; flex-direction: column; align-items: center; box-shadow: inset 0 -3px 0 #ecdcc0; }
+.ft-item .em { font-size: 26px; }
+.ft-item small { font-size: 11px; font-weight: 700; line-height: 1.2; text-align: center; }
+.ft-item i { position: absolute; top: 2px; right: 6px; font-size: 11px; font-style: normal; font-weight: 800; color: var(--ink-soft); }
+.ft-item.on { background: #fff4c9; box-shadow: inset 0 -3px 0 #f0d27a, 0 0 0 2px var(--gold); }
+.ft-empty { align-self: center; color: var(--ink-soft); font-weight: 700; font-size: 13px; padding: 0 8px; }
+.ft-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; flex: 0 0 auto; }
+.ft-btns .btn { padding: 5px 8px; font-size: 12px; }
+@media (max-width: 640px) {
+  #indoor-bar, #visit-bar { top: calc(62px + env(safe-area-inset-top)); padding: 6px 8px; gap: 5px; }
+  .ft-row { flex-direction: column; }
+  .ft-btns { grid-template-columns: repeat(5, 1fr); }
+}
+
+/* 節慶橫幅 */
+.fest-banner { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 22px; background: var(--fc, #d8342c); color: #fff; box-shadow: var(--shadow); font-weight: 800; position: relative; white-space: nowrap; }
+.fest-banner .em { font-size: 1.4em; }
+.fest-banner small { font-weight: 700; opacity: 0.9; }
+.fest-banner .badge { position: absolute; top: -6px; right: -6px; background: #ffd84a; color: #6a3a00; min-width: 1.6em; height: 1.6em; border-radius: 1em; display: grid; place-items: center; font-style: normal; font-size: 0.75em; }
+.fest-head { border-left: 6px solid var(--fc, #d8342c); }
+
+/* 設定 */
+.set-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #fff; border-radius: 14px; padding: 8px 12px; margin-bottom: 6px; box-shadow: inset 0 -3px 0 #ecdcc0; }
+.set-row b { display: block; font-size: 14px; }
+.set-row small { color: var(--ink-soft); font-weight: 700; font-size: 12px; }
+.tog { width: 48px; height: 28px; border-radius: 14px; background: #d8ccb6; position: relative; flex: 0 0 auto; transition: background 0.2s; }
+.tog i { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 2px 3px rgba(0,0,0,0.2); transition: left 0.2s; }
+.tog.on { background: var(--green); }
+.tog.on i { left: 23px; }
+.set-note { font-size: 12px; font-weight: 700; color: var(--ink-soft); margin: 4px 0 6px; line-height: 1.5; }
+.set-btns { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.set-code { width: 100%; height: 70px; border-radius: 12px; border: 2px solid #ead9bb; padding: 8px; font: 12px/1.4 ui-monospace, monospace; resize: vertical; background: #fff; color: var(--ink); user-select: text; -webkit-user-select: text; }
+.set-email { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 6px 10px; border-radius: 12px; border: 2px solid #ead9bb; }
+.set-msg { background: #fff4c9; border-radius: 12px; padding: 8px 12px; font-weight: 700; font-size: 13px; margin: 6px 0; }
+.btn.danger { color: #c0392b; }
+
+/* 月曆印章 */
+.st-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 8px 0 10px; }
+.st-wd { text-align: center; font-size: 11px; font-weight: 800; color: var(--ink-soft); }
+.st-cell { position: relative; aspect-ratio: 1; border-radius: 10px; background: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #c8b596; box-shadow: inset 0 -2px 0 #ecdcc0; }
+.st-cell.empty { background: transparent; box-shadow: none; }
+.st-cell.on { background: #fff0d6; color: var(--ink); }
+.st-cell.on i { position: absolute; font-style: normal; font-size: 18px; opacity: 0.85; }
+.st-cell.today { box-shadow: inset 0 -2px 0 #ecdcc0, 0 0 0 2px var(--gold); }
+.story-row { cursor: pointer; }
+.jn-task .em { font-size: 24px; }
+
+/* 好友與拜訪 */
+.fr-code { font-family: ui-monospace, monospace; font-size: 1.15em; letter-spacing: 1px; color: #c9771c; }
+.fr-add { display: flex; gap: 6px; margin: 6px 0; }
+.fr-input { flex: 1; min-width: 0; font: inherit; font-size: 15px; font-weight: 700; padding: 6px 12px; border-radius: 12px; border: 2px solid #ead9bb; text-transform: uppercase; user-select: text; -webkit-user-select: text; }
+.fr-tag { display: inline-block; font-size: 11px; font-weight: 800; padding: 1px 8px; border-radius: 10px; margin-right: 4px; }
+.fr-tag.steal { background: #ffe0d6; color: #c0503a; }
+.fr-tag.help { background: #e0f5d6; color: #3f8a2e; }
+.fr-log { font-size: 13px; font-weight: 700; padding: 4px 6px; border-bottom: 1px dashed #ead9bb; }
+.fr-log small { color: var(--ink-soft); margin-right: 6px; }
+.vb-title { font-weight: 800; }
+.vb-title small { color: var(--ink-soft); }
+.vb-info { font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+.vb-hint { flex-basis: 100%; text-align: center; font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+
+body.indoor [data-hud='event'], body.editing [data-hud='bag'] { display: none !important; }
+@media (max-width: 640px) {
+  #indoor-bar, #visit-bar { top: calc(64px + env(safe-area-inset-top)); width: 94vw; }
+  .vb-title { font-size: 14px; }
+  .vb-info { font-size: 11px; }
+  .vb-hint { font-size: 11px; line-height: 1.35; }
+  .vb-btns .btn { padding: 5px 10px; font-size: 12px; }
+  .ib-tabs button { padding: 4px 8px; font-size: 12px; }
+  .ib-comfort { font-size: 12px; flex-basis: 100%; text-align: center; }
+  .ib-comfort small { display: none; }
+  .ft-btns .btn { padding: 5px 2px; font-size: 11px; white-space: nowrap; }
+  .ft-item { width: 60px; }
+  .ft-item .em { font-size: 22px; }
+}

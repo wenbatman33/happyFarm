@@ -4,7 +4,7 @@ import { bondLevel } from '../data/economy';
 import type { SaveData } from './state';
 
 // 長線進度（docs/05）：每日任務、每週挑戰、季節手帳、成就、圖鑑
-export type Ev = 'weed' | 'harvest' | 'plant' | 'water' | 'order' | 'pet' | 'cow' | 'milk' | 'debris' | 'compost' | 'sell' | 'coins' | 'gold' | 'craft' | 'fruit';
+export type Ev = 'weed' | 'harvest' | 'plant' | 'water' | 'order' | 'pet' | 'cow' | 'milk' | 'debris' | 'compost' | 'sell' | 'coins' | 'gold' | 'craft' | 'fruit' | 'decor' | 'help' | 'visit' | 'steal';
 
 export interface TaskDef { id: string; ev: Ev; n: number; label: string; need?: (d: SaveData) => boolean }
 export interface TaskState { id: string; got: number; claimed: boolean }

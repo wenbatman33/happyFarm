@@ -10,7 +10,7 @@ export class Mover {
   yawGoal = 0;
   private onArrive: (() => void) | null = null;
 
-  constructor(public obj: THREE.Object3D, private grid: Grid) {}
+  constructor(public obj: THREE.Object3D, public grid: Grid) {}
 
   // 尋路到世界座標；stopShort = 停在目標前方多少距離
   goTo(x: number, z: number, onArrive?: () => void, stopShort = 0): boolean {

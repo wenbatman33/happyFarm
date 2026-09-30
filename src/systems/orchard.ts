@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { sfx } from '../core/audio';
 import { FRUIT_EVERY_MS, ORCHARD_LEVEL, ORCHARD_SLOTS, TREES, TREE_BY_ID, type TreeDef } from '../data/trees';
 import { SEASON_LABEL, type Season } from '../core/clock';
-import { GEO, mat, mesh, withWind } from '../world/materials';
+import { GEO, mat, mesh } from '../world/materials';
+import { TreeMats, buildTree, setTreeSeason, type TreeParts } from '../world/trees3d';
 import type { Game } from '../game';
 import type { MenuView } from '../ui/hud';
 import type { TreeSave } from './state';
@@ -13,13 +14,13 @@ export type TreeStatus = 'locked' | 'empty' | 'growing' | 'offseason' | 'waiting
 const DAY = 86400000;
 const fmtDays = (ms: number) => (ms > DAY ? `${Math.ceil(ms / DAY)} 天` : `${Math.max(1, Math.ceil(ms / 3600000))} 小時`);
 
-interface View { g: THREE.Group; canopy: THREE.Group; fruits: THREE.Group; blossoms: THREE.Group; key: string; shake: number }
+interface View { g: THREE.Group; canopy: THREE.Group; fruits: THREE.Group; blossoms: THREE.Group; key: string; shake: number; parts: TreeParts; season: string }
 
 export class Orchard {
   root = new THREE.Group();
   private views = new Map<number, View>();
   private markers: THREE.Group[] = [];
-  private leaf = withWind(mat('#5fbf49', { roughness: 0.8 }), 0.02);
+  private mats = new TreeMats();
 
   constructor(private game: Game) {
     game.world.root.add(this.root);
@@ -100,44 +101,36 @@ export class Orchard {
     return TREE_BY_ID[t.id];
   }
 
-  private build(def: TreeDef): View {
-    const g = new THREE.Group();
-    const trunk = mesh(new THREE.CylinderGeometry(0.14, 0.22, 1.5, 10), mat('#8a5a3a'));
-    trunk.position.y = 0.75;
-    const canopy = new THREE.Group();
-    canopy.position.y = 1.9;
-    for (let i = 0; i < 4; i++) {
-      const f = mesh(GEO.ico, this.leaf);
-      const a = (i / 4) * Math.PI * 2;
-      f.scale.setScalar(i === 0 ? 1.3 : 1);
-      f.position.set(i === 0 ? 0 : Math.cos(a) * 0.5, i === 0 ? 0.3 : 0, i === 0 ? 0 : Math.sin(a) * 0.5);
-      canopy.add(f);
-    }
+  // 果樹用跟農場樹木一樣的風格化模型（冬天落葉、積雪），果實和花掛在樹冠上
+  private build(def: TreeDef, slot: number): View {
+    const parts = buildTree(40 + slot, this.mats, 'round');
+    const g = parts.group;
+    g.scale.multiplyScalar(0.72);
+    const canopy = parts.canopy;
     const fruits = new THREE.Group();
     const fm = mat(def.fruit, { roughness: 0.4 });
-    for (let i = 0; i < 9; i++) {
-      const a = i * 2.4, r = 0.7 + (i % 3) * 0.1;
+    for (let i = 0; i < 12; i++) {
+      const a = i * 2.4, r = 1.25 + (i % 3) * 0.08;
       const f = mesh(GEO.sphere, fm, false);
-      f.scale.setScalar(0.18);
-      f.position.set(Math.cos(a) * r, -0.1 + (i % 3) * 0.3, Math.sin(a) * r);
+      f.scale.setScalar(0.26);
+      f.position.set(Math.cos(a) * r, 2.35 + (i % 4) * 0.28, Math.sin(a) * r);
       fruits.add(f);
     }
     const blossoms = new THREE.Group();
     const bm = mat(def.blossom, { roughness: 0.6 });
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 18; i++) {
       const a = i * 1.9;
       const b = mesh(GEO.sphereLo, bm, false);
-      b.scale.setScalar(0.12);
-      b.position.set(Math.cos(a) * 0.75, (i % 4) * 0.22 - 0.1, Math.sin(a) * 0.75);
+      b.scale.setScalar(0.17);
+      b.position.set(Math.cos(a) * 1.3, 2.3 + (i % 5) * 0.25, Math.sin(a) * 1.3);
       blossoms.add(b);
     }
     canopy.add(fruits, blossoms);
-    g.add(trunk, canopy);
-    return { g, canopy, fruits, blossoms, key: '', shake: 0 };
+    return { g, canopy, fruits, blossoms, key: '', shake: 0, parts, season: '' };
   }
 
   update(dt: number, now: number, season: Season, leafColor: THREE.Color): void {
-    this.leaf.color.copy(leafColor);
+    this.mats.leaves.forEach((m) => m.color.copy(leafColor));
     const t = performance.now() / 1000;
     ORCHARD_SLOTS.forEach((_, slot) => {
       const tree = this.treeAt(slot);
@@ -147,7 +140,7 @@ export class Orchard {
       const def = TREE_BY_ID[tree.id];
       if (!v || v.key !== tree.id) {
         if (v) this.root.remove(v.g);
-        v = this.build(def);
+        v = this.build(def, slot);
         v.key = tree.id;
         const p = this.pos(slot);
         v.g.position.set(p.x, 0, p.z);
@@ -157,8 +150,10 @@ export class Orchard {
       }
       const { st } = this.status(slot, now);
       const age = (now - tree.plantedAt) / (def.matureDays * DAY);
-      const s = st === 'growing' ? 0.35 + 0.65 * Math.min(1, age) : 1;
+      const s = (st === 'growing' ? 0.35 + 0.65 * Math.min(1, age) : 1) * 0.72;
       v.g.scale.setScalar(s);
+      // 冬天結果的柑橘類是常綠樹，冬天不落葉
+      if (v.season !== season) { v.season = season; setTreeSeason(v.parts, def.season === 'winter' ? 'summer' : season); }
       v.fruits.visible = st === 'ready';
       v.blossoms.visible = st === 'waiting' && def.season === season;
       v.shake = Math.max(0, v.shake - dt * 2);

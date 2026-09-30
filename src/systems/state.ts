@@ -1,19 +1,20 @@
 import { clock, dayKey } from '../core/clock';
-import { NEWBIE_LEVEL, NEWBIE_XP_MULT, RESTED_CAP, RESTED_PER_HOUR, dailyXp, xpNext } from '../data/economy';
+import { LEVEL_CAP, NEWBIE_LEVEL, NEWBIE_XP_MULT, RESTED_CAP, RESTED_PER_HOUR, dailyXp, xpNext } from '../data/economy';
 import type { WeedKind } from '../world/weeds3d';
-import { FIELD_COLS, FIELD_COUNT, STARTER_PLOTS, UNLOCK_ORDER } from './farm';
+import { FIELD_COLS, FIELD_COUNT, GH_COUNT, STARTER_PLOTS, UNLOCK_ORDER } from './farm';
 import { plotsForLevel } from '../data/economy';
 import { SPECIES, type Species } from '../actors/pet';
 import { DEFAULT_LOOK, type Look } from '../actors/player';
 import { freshProg, type ProgSave } from './progress';
+import { comfortStars } from '../data/furniture';
 
 export const SAVE_KEY = 'happyFarm.save';
 export const SCHEMA_VERSION = 1;
 
-export interface PlotSave { owned: boolean; tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number; fert: boolean; boost?: boolean; giantOf?: number }
+export interface PlotSave { owned: boolean; tilled: boolean; cropId: string | null; p0: number; snapAt: number; wetUntil: number; fert: boolean; boost?: boolean; giantOf?: number; stolen?: string }
 export interface WorkSlot { recipe: string; doneAt: number }
 export interface TreeSave { slot: number; id: string; plantedAt: number; pickedAt: number }
-export interface WeedSave { id: string; tx: number; tz: number; ox: number; oz: number; kind: WeedKind; bornAt: number; pulls: number; zone: string }
+export interface WeedSave { id: string; tx: number; tz: number; ox: number; oz: number; kind: WeedKind; bornAt: number; pulls: number; zone: string; by?: string }
 export interface TreasureSpot { id: string; x: number; z: number }
 export interface PetSave {
   name: string; bond: number; touchDay: string; touches: number;
@@ -24,6 +25,23 @@ export interface PetSave {
 export interface MouseSave { id: string; plot: number; bornAt: number }
 export interface OrderSave { id: string; items: { key: string; n: number }[]; coins: number; xp: number; done: boolean }
 export interface DebrisSave { id: string; x: number; z: number; kind: 'stone' | 'boulder' | 'stump' | 'log'; hits: number; rot: number }
+export interface PlacedFurn { uid: string; id: string; x: number; z: number; rot: number }
+export interface RoomSave { items: PlacedFurn[] }
+export type ToolId = 'can' | 'hoe' | 'sickle' | 'pick' | 'axe' | 'robot';
+export interface FestTask { id: string; key: string; n: number; got: number; claimed: boolean }
+export interface SocialSave {
+  hearts: number;
+  friends: string[]; // 好友碼
+  day: string; // 每日計數的日期
+  steals: number;
+  pranks: number;
+  helps: number;
+  perFriend: Record<string, { help: number; gift: boolean; stole: number[]; weeds: string[]; watered: number[]; pranks: [number, number][] }>;
+  inboxAt: number;
+  log: { at: number; text: string }[];
+  npcDay: string; // 本機模擬鄰居對我做事的日期
+}
+export interface Settings { music: boolean; ambience: boolean; haptics: boolean; allowSteal: boolean; south: boolean; notify: boolean; quality: 'auto' | 'low' | 'medium' | 'high' }
 export interface CowSave { name: string; affection: number; fedAt: number; milkReadyAt: number | null; brushDay: string; brushes: number; milked: number }
 
 export interface SaveData {
@@ -63,12 +81,42 @@ export interface SaveData {
   prog: ProgSave;
   workshop: WorkSlot[];
   trees: TreeSave[];
+  // M3 第二批
+  greenhouse: { level: number; buildUntil: number | null };
+  tools: Record<ToolId, number>; // 各工具等級（0＝初始）
+  robotAt: number; // 除草機器人上次工作時間
+  rooms: RoomSave[];
+  comfort: number; // 上次算出的家園舒適度（影響離線休息加成）
+  furn: Record<string, number>; // 還沒擺出來的家具
+  furnSeq: number;
+  // M4
+  festival: { key: string; tokens: number; envelopeDay: string; taskDay: string; tasks: FestTask[]; bought: string[] };
+  stamps: { month: string; days: string[]; claimed: number[] };
+  market: { week: string; sold: Record<string, number>; bought: string[] };
+  story: number[]; // 讀過的章節
+  catchupUntil: number; // 回流追趕加成（XP ×1.5）到期時間
+  petHat: string; // 節慶寵物配件
+  settings: Settings;
+  // M5
+  social: SocialSave;
 }
 
 // 新的乳牛：一開始奶是滿的、肚子餓（第一次見面就能擠奶、餵草）
 export function freshCow(): CowSave {
   return { name: '花花', affection: 0, fedAt: 0, milkReadyAt: 0, brushDay: '', brushes: 0, milked: 0 };
 }
+
+export const freshSocial = (): SocialSave => ({ hearts: 0, friends: [], day: '', steals: 0, pranks: 0, helps: 0, perFriend: {}, inboxAt: 0, log: [], npcDay: '' });
+export const DEFAULT_SETTINGS: Settings = { music: true, ambience: true, haptics: true, allowSteal: true, south: false, notify: false, quality: 'auto' };
+// 新家：客廳先放奶奶留下的幾件家具
+export const freshRooms = (): RoomSave[] => [{ items: [
+  { uid: 'f1', id: 'wood_bed', x: -4, z: -3, rot: 0 },
+  { uid: 'f2', id: 'wood_table', x: 0, z: -1, rot: 0 },
+  { uid: 'f3', id: 'wood_chair', x: 0, z: 0, rot: 2 },
+  { uid: 'f6', id: 'wood_chair', x: 1, z: 0, rot: 2 },
+  { uid: 'f4', id: 'wall_photo', x: 0, z: -3, rot: 0 },
+  { uid: 'f5', id: 'pet_bed', x: 3, z: 1, rot: 0 },
+] }];
 
 export const freshPet = (now: number, species: Species, name = SPECIES[species].name): PetSave =>
   ({ name, bond: 0, touchDay: '', touches: 0, species, adoptedAt: now, stage: 0, tokens: 3, tokenAt: now, giftDay: '', napAt: 0 });
@@ -86,7 +134,7 @@ export function freshSave(now: number): SaveData {
     coins: 120,
     rested: 0,
     inventory: { hay: 5 },
-    plots: Array.from({ length: FIELD_COUNT }, (_, i) => freshPlot(now, UNLOCK_ORDER.indexOf(i) < STARTER_PLOTS)),
+    plots: Array.from({ length: FIELD_COUNT + GH_COUNT }, (_, i) => freshPlot(now, i < FIELD_COUNT && UNLOCK_ORDER.indexOf(i) < STARTER_PLOTS)),
     weeds: [],
     zones: {},
     weedSeq: 0,
@@ -113,6 +161,21 @@ export function freshSave(now: number): SaveData {
     prog: freshProg(),
     workshop: [],
     trees: [],
+    greenhouse: { level: 0, buildUntil: null },
+    tools: { can: 0, hoe: 0, sickle: 0, pick: 0, axe: 0, robot: 0 },
+    robotAt: 0,
+    rooms: freshRooms(),
+    comfort: 10,
+    furn: {},
+    furnSeq: 10,
+    festival: { key: '', tokens: 0, envelopeDay: '', taskDay: '', tasks: [], bought: [] },
+    stamps: { month: '', days: [], claimed: [] },
+    market: { week: '', sold: {}, bought: [] },
+    story: [],
+    catchupUntil: 0,
+    petHat: '',
+    settings: { ...DEFAULT_SETTINGS },
+    social: freshSocial(),
   };
 }
 
@@ -128,7 +191,7 @@ function migrate(d: SaveData): SaveData {
     const oldOrder = [0, 1, 2, 4, 5, 6, 8, 9, 10, 3, 7, 11];
     const cap = plotsForLevel(d.level);
     const now = d.maxSeen;
-    const plots = Array.from({ length: FIELD_COUNT }, () => freshPlot(now, false));
+    const plots = Array.from({ length: FIELD_COUNT + GH_COUNT }, () => freshPlot(now, false));
     old.forEach((p, i) => {
       const ni = Math.floor(i / 4) * FIELD_COLS + (i % 4);
       plots[ni] = { ...p, owned: oldOrder.indexOf(i) < Math.min(cap, 12), fert: false };
@@ -151,6 +214,22 @@ function migrate(d: SaveData): SaveData {
   if (!d.prog) d.prog = freshProg();
   if (!d.workshop) d.workshop = [];
   if (!d.trees) d.trees = [];
+  // M3 第二批／M4／M5（2026-10-01）：溫室田（田區後面接 18 格）、工具、室內、節慶、印章、市集、社交
+  while (d.plots.length < FIELD_COUNT + GH_COUNT) d.plots.push(freshPlot(d.maxSeen, false));
+  if (!d.greenhouse) d.greenhouse = { level: 0, buildUntil: null };
+  if (!d.tools) d.tools = { can: 0, hoe: 0, sickle: 0, pick: 0, axe: 0, robot: 0 };
+  if (d.robotAt === undefined) d.robotAt = 0;
+  if (!d.rooms) { d.rooms = freshRooms(); d.furnSeq = 10; }
+  if (!d.furn) d.furn = {};
+  if (d.comfort === undefined) d.comfort = 10;
+  if (!d.festival) d.festival = { key: '', tokens: 0, envelopeDay: '', taskDay: '', tasks: [], bought: [] };
+  if (!d.stamps) d.stamps = { month: '', days: [], claimed: [] };
+  if (!d.market) d.market = { week: '', sold: {}, bought: [] };
+  if (!d.story) d.story = [];
+  if (d.catchupUntil === undefined) d.catchupUntil = 0;
+  if (d.petHat === undefined) d.petHat = '';
+  d.settings = { ...DEFAULT_SETTINGS, ...(d.settings ?? {}) };
+  if (!d.social) d.social = freshSocial();
   return d;
 }
 
@@ -159,6 +238,7 @@ export class GameState {
   isNew = false;
   rewound = false;
   offlineHours = 0;
+  frozen = false; // 讀取別的存檔、重新開始時：不要再把目前的狀態寫回去
   onLevelUp?: (level: number) => void;
 
   constructor() {
@@ -175,7 +255,9 @@ export class GameState {
     const hours = Math.max(0, (this.now() - d.lastActive) / 3600000);
     this.offlineHours = hours;
     const cap = dailyXp(d.level) * RESTED_CAP;
-    d.rested = Math.min(cap, d.rested + hours * RESTED_PER_HOUR * dailyXp(d.level));
+    // 家園舒適度每一顆星，休息加成多累積 10%
+    const stars = comfortStars(d.comfort ?? 10);
+    d.rested = Math.min(cap, d.rested + hours * RESTED_PER_HOUR * dailyXp(d.level) * (1 + 0.1 * stars));
     // 請求持久化儲存（降低 Safari 清除存檔的風險）
     void navigator.storage?.persist?.();
   }
@@ -188,6 +270,7 @@ export class GameState {
   }
 
   save(): void {
+    if (this.frozen) return;
     this.data.lastActive = this.now();
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); } catch { /* 容量滿或無痕模式 */ }
   }
@@ -212,7 +295,7 @@ export class GameState {
     if (d.level < NEWBIE_LEVEL) gained *= NEWBIE_XP_MULT;
     gained = Math.round(gained);
     d.xp += gained;
-    while (d.xp >= xpNext(d.level)) {
+    while (d.level < LEVEL_CAP && d.xp >= xpNext(d.level)) {
       d.xp -= xpNext(d.level);
       d.level++;
       this.onLevelUp?.(d.level);

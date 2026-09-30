@@ -87,6 +87,9 @@ export class Player {
   pushing = false; // 推除草機中（移動由 Mower 控制）
   pushSpeed = 0;
 
+  // 進出室內時切換走路用的格網
+  setGrid(g: Grid): void { this.grid = g; this.mover.grid = g; }
+
   constructor(private grid: Grid) {
     this.mover = new Mover(this.root, grid);
     this.build();
