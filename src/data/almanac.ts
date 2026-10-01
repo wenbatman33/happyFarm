@@ -7,9 +7,7 @@ export interface AlmanacEntry { id: string; name: string; emoji: string; cat: st
 const S = { spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季', all: '全季' } as const;
 
 // 尚未實作的作物（其餘四季作物已由 CROPS 自動列入）
-const PLANNED: [string, string, string, keyof typeof S, number, string][] = [
-  ['lotus', '蓮花', '🪷', 'summer', 38, '池塘開放後推出'],
-];
+const PLANNED: [string, string, string, keyof typeof S, number, string][] = [];
 
 export const NIGHT_FLOWERS: [string, string, string, keyof typeof S, number][] = [
   ['moonlily', '月光鈴蘭', '🔔', 'spring', 28], ['epiphyllum', '曇花', '🤍', 'summer', 30], ['primrose', '月見草', '🌙', 'autumn', 31], ['frostflower', '霜月花', '❄️', 'winter', 32],

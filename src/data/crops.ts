@@ -18,7 +18,9 @@ export type CropShape =
   | { kind: 'bush'; leaf: string; leaf2: string; berry: string; style: 'berry' | 'mat' | 'tea' | 'lavender' | 'chili' }
   // 瓜類：貼地大葉＋躺在土上的大果實
   | { kind: 'melon'; leaf: string; fruit: string; stripe: string; style: 'watermelon' | 'pumpkin' }
-  | { kind: 'giant'; variant: 'pumpkin' | 'daikon' | 'cabbage' | 'watermelon' };
+  | { kind: 'giant'; variant: 'pumpkin' | 'daikon' | 'cabbage' | 'watermelon' }
+  // 水生：浮在水面上（原點＝水面），蓮花、西洋菜
+  | { kind: 'aquatic'; leaf: string; flower: string; style: 'lotus' | 'cress' };
 
 export interface CropDef {
   id: string;
@@ -30,6 +32,7 @@ export interface CropDef {
   shape: CropShape;
   night?: boolean; // 夜間花：只在 19:00–05:00 生長
   giant?: boolean; // 巨型作物：佔 3×3
+  water?: boolean; // 水生作物：只能種在池塘的水面位置
   seed: number;
   sell: number;
   xp: number;
@@ -74,9 +77,11 @@ export const CROPS: CropDef[] = [
   def('pumpkin', '南瓜', '🎃', 'autumn', 720, 25, { kind: 'melon', leaf: '#4f8f3a', fruit: '#f5861f', stripe: '#d86a14', style: 'pumpkin' }),
   def('watermelon', '西瓜', '🍉', 'summer', 720, 26, { kind: 'melon', leaf: '#4f9e3a', fruit: '#7cc45a', stripe: '#1f5a24', style: 'watermelon' }),
   def('poinsettia', '聖誕紅', '🌺', 'winter', 720, 26, { kind: 'flower', leaf: '#2f7a3a', stem: '#3f7a2a', flower: '#e0242f', flower2: '#ffd84a', style: 'bract' }),
+  { ...def('watercress', '西洋菜', '🥬', 'all', 180, 30, { kind: 'aquatic', leaf: '#5fcf48', flower: '#ffffff', style: 'cress' }), water: true },
   def('lavender', '薰衣草', '💜', 'spring', 1440, 35, { kind: 'bush', leaf: '#8aa88a', leaf2: '#a7c49a', berry: '#8a5ad0', style: 'lavender' }),
   def('rice', '稻米', '🍚', 'autumn', 1440, 36, { kind: 'grain', stalk: '#c9b04a', head: '#f0c24a', droop: true }),
   def('ginger', '老薑', '🫚', 'winter', 1440, 37, { kind: 'root', root: '#d9b27a', rootShape: 'rhizome', leaf: '#4f9e3a', leafCount: 3, top: '#f28aa0' }),
+  { ...def('lotus', '蓮花', '🪷', 'summer', 1440, 38, { kind: 'aquatic', leaf: '#4fae3f', flower: '#ff6fa8', style: 'lotus' }), water: true },
 ];
 
 // 夜間花（docs/04 §4.2）

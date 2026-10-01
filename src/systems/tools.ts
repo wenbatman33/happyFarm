@@ -9,9 +9,9 @@ import type { Game } from '../game';
 import type { ToolId, WeedSave } from './state';
 
 // 工具升級（docs/03 §4.4、§5）：木匠老木的工具箱＋除草小機器人
-const ORDER: ToolId[] = ['can', 'hoe', 'sickle', 'pick', 'axe', 'robot'];
+const ORDER: ToolId[] = ['can', 'hoe', 'sickle', 'shears', 'pick', 'axe', 'robot'];
 const SICKLE_AUTO = 6; // 小鐮刀 Lv6 自動拿到
-const ROBOT_SKIP = new Set(['dandelion', 'leaves', 'snow', 'big']); // 稀有草、季節雜草留給玩家
+const ROBOT_SKIP = new Set(['dandelion', 'leaves', 'snow', 'big', 'vine']); // 稀有草、季節雜草留給玩家
 
 function buildRobot(): THREE.Group {
   const g = new THREE.Group();

@@ -71,6 +71,9 @@ export interface SceneLayout {
   workshop: PropPlacement; // 加工坊（Lv15）
   greenhouse: PropPlacement; // 溫室（Lv40）中心；外框 x±4.5、z±2.5，南側中央開門
   market: PropPlacement; // 週末市集／流浪商人攤位（面向小徑）
+  pond: PropPlacement; // 池塘（Lv30）中心；水面是橢圓，半徑 x 2.3、z 1.8（scale 可整體縮放）
+  beehives: PropPlacement[]; // 蜂箱位置（第 9 章）
+  telescope: PropPlacement; // 望遠鏡（第 10 章）
   trees: PropPlacement[];
   rocks: PropPlacement[];
 }
@@ -87,8 +90,11 @@ export const SCENE_LAYOUT: SceneLayout = {
   workshop: p(5.6, -5.4),
   greenhouse: p(-8, -11),
   market: p(-3.4, 9.4, Math.PI / 2),
-  trees: [p(-1.8, -11.9, 0, 1.2), p(4.2, -11.8, 0.8, 1.05), p(-12.4, 0.8, 1.2, 1.15), p(11, 7, 2.1, 1.3), p(-8, 10, 0.3, 0.95), p(8.5, 11, 1.7, 1.05), p(-12, -4, 2.5, 1), p(12, -3, 0.9, 0.9)],
-  rocks: [p(-3.5, 6, 0.3, 1), p(6, -2, 1.2, 0.8), p(-9.6, 8.8, 2, 1.2), p(10, 2, 0.5, 0.9), p(-2, 11, 1.1, 0.7)],
+  pond: p(10.6, 3.2),
+  beehives: [p(8.6, -6.4), p(9.9, -6.4), p(11.2, -6.4)],
+  telescope: p(-10.5, -6.8, 0.6),
+  trees: [p(-1.8, -11.9, 0, 1.2), p(4.2, -11.8, 0.8, 1.05), p(-12.4, 0.8, 1.2, 1.15), p(12.2, 12.4, 2.1, 1.3), p(-8, 10, 0.3, 0.95), p(7.2, 12.5, 1.7, 1.05), p(-12, -4, 2.5, 1), p(12, -3, 0.9, 0.9)],
+  rocks: [p(-3.5, 6, 0.3, 1), p(6, -2, 1.2, 0.8), p(-9.6, 8.8, 2, 1.2), p(9.6, -1.6, 0.5, 0.9), p(-2, 11, 1.1, 0.7)],
 };
 
 // 光影微調（DEV 工具「光影」分頁）

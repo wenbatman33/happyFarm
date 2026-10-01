@@ -21,6 +21,8 @@ export const ITEM_INFO: Record<string, { name: string; emoji: string; price: num
   stone: { name: '石材', emoji: '🪨', price: 3 },
   fert: { name: '有機肥', emoji: '🧪', price: 20 },
   giantseed: { name: '巨型種子', emoji: '🌰', price: 0 },
+  vine: { name: '藤條', emoji: '🪢', price: 8 },
+  honey: { name: '蜂蜜', emoji: '🍯', price: 140 },
 };
 // 加工品、水果、巨型作物
 for (const r of RECIPES) ITEM_INFO[r.id] = { name: r.name, emoji: r.emoji, price: r.sell };
@@ -42,6 +44,8 @@ export interface OrderCard {
   xp: number;
   canDeliver: boolean;
   done: boolean;
+  cafe?: boolean; // 咖啡廳特殊訂單
+  bonus?: string; // 附贈的禮物
 }
 
 export class Hud {
@@ -337,10 +341,11 @@ export class Hud {
     const p = $('#orders-panel');
     $('.ord-sub', p).textContent = sub;
     const html = cards.map((c) => `
-      <div class="order ${c.done ? 'done' : ''}">
+      <div class="order ${c.done ? 'done' : ''} ${c.cafe ? 'cafe' : ''}">
+        ${c.cafe ? '<div class="ord-cafe">☕ 咖啡廳特別訂單</div>' : ''}
         <div class="ord-items">${c.items.map((it) => `<div class="ord-it ${it.have >= it.need ? 'ok' : ''}"><span class="em">${it.emoji}</span><span class="nm">${it.name}</span><span class="ct">${Math.min(it.have, it.need)}/${it.need}</span></div>`).join('')}</div>
-        <div class="ord-reward">🪙${c.coins}　✨${c.xp} XP</div>
-        ${c.done ? '<div class="stamp">完成</div>' : `<div class="ord-btns"><button class="btn ${c.canDeliver ? '' : 'off'}" data-oid="${c.id}" data-kind="deliver">交貨</button><button class="btn ghost small" data-oid="${c.id}" data-kind="skip">換一張</button></div>`}
+        <div class="ord-reward">🪙${c.coins}　✨${c.xp} XP${c.bonus ? `<br>🎁 ${c.bonus}` : ''}</div>
+        ${c.done ? '<div class="stamp">完成</div>' : `<div class="ord-btns"><button class="btn ${c.canDeliver ? '' : 'off'}" data-oid="${c.id}" data-kind="deliver">交貨</button>${c.cafe ? '' : `<button class="btn ghost small" data-oid="${c.id}" data-kind="skip">換一張</button>`}</div>`}
       </div>`).join('');
     const box = $('.orders', p);
     if (box.innerHTML !== html) box.innerHTML = html;

@@ -65,7 +65,7 @@ export const GREENHOUSE: { level: number; coins: number; wood: number; stone: nu
 
 // 工具升級（docs/03 §4.4、§5）：木匠老木的工具箱
 export interface ToolTier { name: string; level: number; coins: number; wood?: number; stone?: number; desc: string }
-export const TOOLS: Record<'can' | 'hoe' | 'sickle' | 'pick' | 'axe' | 'robot', { name: string; emoji: string; tiers: ToolTier[] }> = {
+export const TOOLS: Record<'can' | 'hoe' | 'sickle' | 'shears' | 'pick' | 'axe' | 'robot', { name: string; emoji: string; tiers: ToolTier[] }> = {
   can: { name: '澆水壺', emoji: '🚿', tiers: [
     { name: '木水壺', level: 1, coins: 0, desc: '一次澆 1 塊田' },
     { name: '銅水壺', level: 12, coins: 2000, stone: 10, desc: '一次澆一排 3 塊' },
@@ -80,6 +80,10 @@ export const TOOLS: Record<'can' | 'hoe' | 'sickle' | 'pick' | 'axe' | 'robot', 
     { name: '徒手', level: 1, coins: 0, desc: '一次拔 1 株' },
     { name: '小鐮刀', level: 6, coins: 0, desc: '前方扇形 1.3 m，一次 3 株（Lv6 自動拿到）' },
     { name: '大鐮刀', level: 20, coins: 5000, wood: 15, desc: '前方扇形 2 m，一次 6 株，連大草叢都一刀' },
+  ] },
+  shears: { name: '修枝剪', emoji: '✂️', tiers: [
+    { name: '還沒有', level: 1, coins: 0, desc: '' },
+    { name: '修枝剪', level: 10, coins: 800, desc: '可以剪掉房子牆上的藤蔓（藤條能做花圈）' },
   ] },
   pick: { name: '鎬', emoji: '⛏️', tiers: [
     { name: '鐵鎬', level: 1, coins: 0, desc: '大石頭要敲 3 下' },
@@ -143,7 +147,7 @@ export function rollQuality(rand: number, noWeeds: boolean, fert = false): Quali
 
 // 除草
 export const WEED_SPAWN_MS = 90 * 60 * 1000;
-export const WEED_XP = { sprout: 3, bush: 5, big: 8, dandelion: 4, leaves: 4, snow: 4 } as const;
+export const WEED_XP = { sprout: 3, bush: 5, big: 8, dandelion: 4, leaves: 4, snow: 4, vine: 10 } as const;
 export const COMBO_WINDOW_MS = 1600;
 
 // 手推除草機：正式版 Lv45 解鎖；M0 試玩先開放
@@ -176,3 +180,18 @@ export const bondLevel = (points: number): number => {
 };
 export const PET_TOUCH_POINTS = 10;
 export const PET_TOUCH_DAILY = 3;
+
+// ---------- M6：池塘、蜂箱、寵物小屋、咖啡廳、流星 ----------
+// 池塘（docs/03 §1，Lv30）：挖好後有 6 個水生作物位置
+export const POND = { level: 30, coins: 20000, stone: 40, ms: 3 * 3600000 };
+// 寵物小屋升級（第 6 章）：升級後可以收養其他寵物（最多 4 隻）
+export const PET_HOUSE_T2 = { coins: 20000, wood: 40 };
+export const PET_ADOPT_COINS = 3000;
+// 蜂箱（第 9 章）：每 6 小時產蜂蜜，田裡有成熟的花越多產量越多；冬天蜜蜂休息
+export const HIVE = { coins: 5000, wood: 20, ms: 6 * 3600000, base: 2, maxBonus: 3 };
+export const HONEY_SELL = 140;
+export const HONEY_XP = 35;
+// 咖啡廳訂單（第 8 章）：每天一張，組合加工品，價格 ×2.2
+export const CAFE_MULT = 2.2;
+// 流星（第 10 章）：晚上 20:00–04:00，間隔 90–240 秒；夜間花成長 ×1.25
+export const NIGHT_FLOWER_BOOST = 1.25;

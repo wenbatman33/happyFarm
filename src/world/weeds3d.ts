@@ -1,27 +1,68 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../core/rng';
-import { GEO, mat, mesh, withWind } from './materials';
+import { GEO, mat, mesh } from './materials';
 import { bakeGroup } from './bake';
 
-export type WeedKind = 'sprout' | 'bush' | 'big' | 'dandelion' | 'leaves' | 'snow';
+export type WeedKind = 'sprout' | 'bush' | 'big' | 'dandelion' | 'leaves' | 'snow' | 'vine';
 
 // 雜草要一眼跟草皮分開：飽和的深綠色、成叢的長葉＋狗尾草穗，底下只有柔和的接地陰影（不再是一塊泥土）
 // 草葉合併成一個幾何（頂點色：根部深綠 → 草尖黃綠），每株只有少數幾個 draw call
-const BLADE_MAT = withWind(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, side: THREE.DoubleSide }), 0.45);
+const BLADE_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, side: THREE.DoubleSide });
 const M = {
-  leaf: withWind(mat('#3fae33', { roughness: 0.55 }), 0.4),
-  leafDark: withWind(mat('#2b8a2a', { roughness: 0.6 }), 0.4),
-  stem: withWind(mat('#5a9a34', { roughness: 0.7 }), 0.5),
-  spike: withWind(mat('#b9cf62', { roughness: 0.85 }), 0.5),
-  yellow: withWind(mat('#ffd23a', { roughness: 0.45, emissive: '#ffb000', emissiveIntensity: 0.18 }), 0.5),
-  puff: withWind(mat('#ffffff', { roughness: 0.9, transparent: true, opacity: 0.85 }), 0.6),
+  leaf: mat('#3fae33', { roughness: 0.55 }),
+  leafDark: mat('#2b8a2a', { roughness: 0.6 }),
+  stem: mat('#5a9a34', { roughness: 0.7 }),
+  spike: mat('#b9cf62', { roughness: 0.85 }),
+  yellow: mat('#ffd23a', { roughness: 0.45, emissive: '#ffb000', emissiveIntensity: 0.18 }),
+  puff: mat('#ffffff', { roughness: 0.9, transparent: true, opacity: 0.85 }),
   leafA: mat('#f08a3c', { roughness: 0.75 }),
   leafB: mat('#e05a38', { roughness: 0.75 }),
   leafC: mat('#f4bc48', { roughness: 0.75 }),
   leafD: mat('#b8552e', { roughness: 0.8 }),
   twig: mat('#7a5436', { roughness: 0.9 }),
   snow: mat('#f7fbff', { roughness: 0.75 }),
+  vineStem: mat('#5a6a2a', { roughness: 0.8 }),
+  vineLeaf: mat('#3f8f34', { roughness: 0.6, side: THREE.DoubleSide }),
+  vineLeaf2: mat('#5aac3c', { roughness: 0.6, side: THREE.DoubleSide }),
+  vineFlower: mat('#f4e7ff', { roughness: 0.5 }),
 };
+
+// 牆面藤蔓：從牆腳往上爬的幾條藤，沿路長心形葉子（原點在牆腳、牆面上，往 +z 只凸出一點點）
+function buildVine(g: THREE.Group, rand: () => number) {
+  const n = 3 + Math.floor(rand() * 2);
+  for (let k = 0; k < n; k++) {
+    const pts: THREE.Vector3[] = [];
+    const x0 = (rand() - 0.5) * 0.5;
+    const h = 1.3 + rand() * 0.8;
+    for (let i = 0; i <= 6; i++) {
+      const t = i / 6;
+      pts.push(new THREE.Vector3(x0 + Math.sin(t * 5 + k * 2) * 0.22 * t + (rand() - 0.5) * 0.08, t * h, 0.04 + Math.sin(t * 7 + k) * 0.02));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const stem = new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.022, 5), M.vineStem);
+    stem.castShadow = true;
+    g.add(stem);
+    const leaves = 8 + Math.floor(rand() * 5);
+    for (let i = 0; i < leaves; i++) {
+      const t = 0.08 + (i / leaves) * 0.92;
+      const p = curve.getPoint(t);
+      const side = i % 2 ? 1 : -1;
+      const l = mesh(GEO.sphereLo, i % 3 ? M.vineLeaf : M.vineLeaf2);
+      const s = 0.11 + rand() * 0.06;
+      l.scale.set(s, s * 1.15, 0.02);
+      l.position.set(p.x + side * s * 0.8, p.y, p.z + 0.03);
+      l.rotation.z = side * (0.5 + rand() * 0.4);
+      g.add(l);
+    }
+    if (rand() < 0.6) {
+      const f = mesh(GEO.sphereLo, M.vineFlower, false);
+      const p = curve.getPoint(0.6 + rand() * 0.3);
+      f.scale.setScalar(0.06);
+      f.position.set(p.x, p.y, p.z + 0.05);
+      g.add(f);
+    }
+  }
+}
 
 // 接地陰影：放射狀漸層的小圓片
 const shadowTex = (() => {
@@ -211,6 +252,9 @@ export function buildWeed(kind: WeedKind, seed: number): THREE.Group {
       squash.add(tw);
       break;
     }
+    case 'vine':
+      buildVine(squash, rand);
+      break;
     case 'snow':
       // 積雪：圓滾滾的雪堆，頂上冒出一點草尖
       contactShadow(g, 0.5);

@@ -5,6 +5,7 @@ import { Mover } from './mover';
 import { clamp, lerp } from '../core/rng';
 import type { Player } from './player';
 import { Models, node } from '../world/models';
+import { buildPetOutfit, fitPetNeck, type OutfitAnchor } from '../world/accessories3d';
 
 // 寵物：開局 4 選 1（docs/02 §2）。M2 先用程式建模，之後換成 Blender GLB
 export type Species = 'corgi' | 'cat' | 'bunny' | 'duck';
@@ -447,16 +448,18 @@ export class Pet {
     this.hatObj = this.bandanaObj = null;
     this.applyGrowth(this.stage, true);
     if (this.festive) { const k = this.festive.kind; this.festive = null; this.setFestiveHat(k); }
+    if (this.outfitId) this.setOutfit(this.outfitId);
   }
 
   // 節慶配件：戴帽子時先把草帽收起來
   setFestiveHat(kind: string): void {
     if (this.festive) { this.festive.obj.parent?.remove(this.festive.obj); this.festive = null; }
     if (this.hatObj) this.hatObj.visible = !kind || kind === 'pethat_sachet';
-    if (!kind) return;
+    if (!kind) { this.syncOutfit(); return; }
     const h = makeFestiveHat(kind);
     (h.neck ? this.rig.neck : this.rig.hat).add(h.obj);
     this.festive = { kind, obj: h.obj, neck: h.neck };
+    this.syncOutfit();
   }
 
   // 成長階段（0 幼年、1 少年、2 成年）；instant=false 時播成長過場
@@ -475,6 +478,7 @@ export class Pet {
     this.scaler.scale.setScalar(lerp(a.scale, b.scale, e));
     this.rig.head.scale.setScalar(lerp(a.head, b.head, e));
     this.rig.eyes.forEach((ey) => { ey.scale.x = ey.scale.z = lerp(a.eye, b.eye, e); });
+    for (const p of this.outfitParts ?? []) if (p.anchor === 'neck') fitPetNeck(p.obj, this.species, this.rig.head.scale.x);
   }
 
   setGrid(g: Grid): void { this.mover.grid = g; }
@@ -484,6 +488,33 @@ export class Pet {
     if (!hat && this.hatObj) { this.rig.hat.remove(this.hatObj); this.hatObj = null; }
     if (bandana && !this.bandanaObj) { this.bandanaObj = makeBandana(); this.rig.neck.add(this.bandanaObj); }
     if (!bandana && this.bandanaObj) { this.rig.neck.remove(this.bandanaObj); this.bandanaObj = null; }
+    this.syncOutfit();
+  }
+
+  // 服裝工坊：寵物服裝（'' = 不穿）；換物種、成長後都會保留
+  private outfitId = '';
+  private outfitParts: { obj: THREE.Object3D; anchor: OutfitAnchor }[] = [];
+  get outfit(): string { return this.outfitId; }
+  setOutfit(id: string): void {
+    for (const p of this.outfitParts) p.obj.parent?.remove(p.obj);
+    this.outfitParts = [];
+    this.outfitId = id;
+    if (id) {
+      const o = buildPetOutfit(id, this.species);
+      this.outfitParts = [{ obj: o.obj, anchor: o.anchor }, ...(o.extra ?? [])];
+      for (const p of this.outfitParts) (p.anchor === 'hat' ? this.rig.hat : p.anchor === 'neck' ? this.rig.neck : this.rig.body).add(p.obj);
+      for (const p of this.outfitParts) if (p.anchor === 'neck') fitPetNeck(p.obj, this.species, this.rig.head.scale.x);
+    }
+    this.syncOutfit();
+  }
+  // 同一個掛點只顯示一件：節慶配件 > 服裝 > 親密度配件（小草帽、紅領巾）
+  private syncOutfit(): void {
+    if (!this.outfitParts) return; // 建構途中
+    const used = new Set(this.outfitParts.map((p) => p.anchor));
+    const fest: OutfitAnchor | null = this.festive ? (this.festive.neck ? 'neck' : 'hat') : null;
+    for (const p of this.outfitParts) p.obj.visible = p.anchor !== fest;
+    if (this.hatObj) this.hatObj.visible = fest !== 'hat' && !used.has('hat');
+    if (this.bandanaObj) this.bandanaObj.visible = !used.has('neck');
   }
 
   react(): void {

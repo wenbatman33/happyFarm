@@ -1,5 +1,5 @@
 import { CROP_BY_ID } from './crops';
-import { MILK_SELL, MILK_XP } from './economy';
+import { HONEY_SELL, HONEY_XP, MILK_SELL, MILK_XP } from './economy';
 
 // 加工坊（docs/06 §7.2）：成品售價 = 原料售價總和 × 1.8，XP = 原料 XP × 0.5，時間 = 原料最長成長時間 × 0.5（最多 4 小時）
 export interface Recipe { id: string; name: string; emoji: string; inputs: { key: string; n: number }[]; unlock: number; minutes: number; sell: number; xp: number }
@@ -25,6 +25,12 @@ const RAW: [string, string, string, [string, number][], number][] = [
   ['pumpkinpie', '南瓜派', '🥧', [['pumpkin', 1], ['flour', 2]], 26],
   ['lavendersoap', '薰衣草皂', '🧼', [['lavender', 2], ['butter', 1]], 35],
   ['tangyuan', '湯圓', '🍡', [['rice', 2], ['sugarcane', 1]], 36],
+  // M6：藤條、蜂蜜、水生作物
+  ['vinewreath', '藤編花圈', '💐', [['vine', 4]], 12],
+  ['cresssoup', '西洋菜湯', '🥣', [['watercress', 3], ['onion', 1]], 30],
+  ['lotusseed', '蓮子湯', '🍵', [['lotus', 2], ['sugarcane', 1]], 38],
+  ['honeycake', '蜂蜜蛋糕', '🍰', [['flour', 2], ['honey', 1], ['milk', 1]], 72],
+  ['honeytea', '蜂蜜春茶', '🧋', [['tea', 2], ['honey', 1]], 72],
   // 房屋 T5 要用的風車零件（木材＋石材）
   ['windpart', '風車零件', '⚙️', [['wood', 10], ['stone', 10]], 60],
 ];
@@ -37,6 +43,8 @@ function base(key: string): { sell: number; xp: number; minutes: number } {
   const c = CROP_BY_ID[key];
   if (c) return { sell: c.sell, xp: c.xp, minutes: c.minutes };
   if (key === 'milk') return { sell: MILK_SELL, xp: MILK_XP, minutes: 240 };
+  if (key === 'honey') return { sell: HONEY_SELL, xp: HONEY_XP, minutes: 360 };
+  if (key === 'vine') return { sell: 8, xp: 4, minutes: 60 };
   const r = RECIPE_BY_ID[key];
   return r ? { sell: r.sell, xp: r.xp, minutes: r.minutes } : { sell: 1, xp: 1, minutes: 1 };
 }

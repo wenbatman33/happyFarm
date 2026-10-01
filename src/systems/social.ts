@@ -10,7 +10,7 @@ import { SOCIAL_RULES, type FarmSnapshot, type FriendSummary, type PublishSnapsh
 import { Sheet, row } from '../ui/sheet';
 import { ITEM_INFO } from '../ui/hud';
 import { tileOf } from '../world/grid';
-import { Farm, FIELD_COUNT, GH_COUNT } from './farm';
+import { Farm, FIELD_COUNT, GH_COUNT, POND_COUNT } from './farm';
 import { Weeds } from './weeds';
 import type { Game } from '../game';
 import type { GameState, PlotSave, WeedSave } from './state';
@@ -206,8 +206,8 @@ export class Social {
     sfx.door();
     await g.fade(true);
     const plots: PlotSave[] = [...snap.plots.slice(0, FIELD_COUNT)];
-    while (plots.length < FIELD_COUNT + GH_COUNT) plots.push({ owned: false, tilled: false, cropId: null, p0: 0, snapAt: 0, wetUntil: 0, fert: false });
-    const fake = { data: { plots, level: 99, greenhouse: { level: 0 }, weeds: snap.weeds.map((w) => ({ ...w })), zones: {}, weedSeq: 0 }, now: () => g.state.now() };
+    while (plots.length < FIELD_COUNT + GH_COUNT + POND_COUNT) plots.push({ owned: false, tilled: false, cropId: null, p0: 0, snapAt: 0, wetUntil: 0, fert: false });
+    const fake = { data: { plots, level: 99, greenhouse: { level: 0 }, pond: { level: 0 }, weeds: snap.weeds.map((w) => ({ ...w })), zones: {}, weedSeq: 0 }, now: () => g.state.now() };
     const st = fake as unknown as GameState;
     const farm = new Farm(g.world.root, st, g.sceneLayout.field, g.sceneLayout.greenhouse);
     farm.showSigns = false;
@@ -219,6 +219,11 @@ export class Social {
     g.world.setScaffold(false);
     g.world.setGreenhouse(0, false);
     g.world.setDecor(snap.decor, g.season);
+    // 自己的池塘、蜂箱、望遠鏡、寵物小屋都先收起來（好友的農場不一定有）
+    g.world.setPond(0, false);
+    g.world.setBeehives(g.sceneLayout.beehives.map(() => 'none'));
+    g.world.setTelescope(false);
+    g.world.setPetHouseTier(1);
     g.world.rebuildGrid();
     const pet = new Pet(g.grid, snap.pet.species, snap.pet.name);
     pet.setStage(snap.pet.stage, true);
@@ -262,6 +267,11 @@ export class Social {
     g.world.setScaffold(v.saved.scaffold);
     g.world.setGreenhouse(v.saved.gh, !!g.state.data.greenhouse.buildUntil);
     g.world.setDecor(v.saved.decor, g.season);
+    const dd = g.state.data;
+    g.world.setPond(dd.pond.level ? 1 : 0, !!dd.pond.buildUntil);
+    g.apiary.sync();
+    g.world.setTelescope(g.stars.unlocked);
+    g.world.setPetHouseTier(dd.petHouse >= 2 ? 2 : 1);
     g.world.rebuildGrid();
     document.body.classList.remove('visiting');
     this.bar.classList.add('hidden');

@@ -33,6 +33,12 @@ export const GH_OFFSETS: [number, number][] = [
   [1, 0], [2, 0], [3, 0], [1, 1], [2, 1], [3, 1], // 第二期
   [-3, -1], [-2, -1], [-1, -1], [1, -1], [2, -1], [3, -1], // 第三期
 ];
+// 池塘田：接在溫室田後面，6 個浮在水面上的位置（相對於池塘中心，不是整數格）
+export const POND_COUNT = 6;
+export const POND_START = FIELD_COUNT + GH_COUNT;
+export const POND_OFFSETS: [number, number][] = [[-1.2, -0.8], [0, -1.0], [1.2, -0.7], [-1.0, 0.7], [0.2, 0.9], [1.3, 0.6]];
+export const POND_Y = 0.05; // 水面高度
+
 export const ghPlotsFor = (level: number): number => (level <= 0 ? 0 : GREENHOUSE[Math.min(level, GREENHOUSE.length) - 1].plots);
 
 const DRY_RATE = 0.6;
@@ -124,17 +130,45 @@ export class Farm {
   hasDebris: (i: number) => boolean = () => false;
   showSigns = true; // 拜訪好友時不顯示買地的價格牌
 
-  constructor(parent: THREE.Object3D, private state: GameState, private place: PropPlacement, private gh?: PropPlacement) {
+  nightBoost = 1; // 第 10 章之後夜間花長得比較快
+
+  constructor(parent: THREE.Object3D, private state: GameState, private place: PropPlacement, private gh?: PropPlacement, private pond?: PropPlacement) {
     parent.add(this.root);
-    for (let i = 0; i < FIELD_COUNT + GH_COUNT; i++) this.views.push(this.makeView());
+    for (let i = 0; i < FIELD_COUNT + GH_COUNT + POND_COUNT; i++) this.views.push(this.makeView());
     this.reposition();
   }
 
-  get count(): number { return FIELD_COUNT + GH_COUNT; }
+  get count(): number { return FIELD_COUNT + GH_COUNT + POND_COUNT; }
 
-  isGH(i: number): boolean { return i >= FIELD_COUNT; }
+  isGH(i: number): boolean { return i >= FIELD_COUNT && i < POND_START; }
+  isPond(i: number): boolean { return i >= POND_START; }
+
+  // 池塘：點到水面上的哪一個作物位置
+  pondAt(x: number, z: number): number {
+    if (!this.pond || (this.state.data.pond?.level ?? 0) < 1) return -1;
+    let best = -1, bd = 0.75;
+    POND_OFFSETS.forEach(([dx, dz], k) => { const d = Math.hypot(this.pond!.x + dx - x, this.pond!.z + dz - z); if (d < bd) { bd = d; best = POND_START + k; } });
+    return best;
+  }
+
+  nearPond(x: number, z: number): boolean {
+    if (!this.pond || (this.state.data.pond?.level ?? 0) < 1) return false;
+    return Math.hypot((x - this.pond.x) / 4.3, (z - this.pond.z) / 3.8) < 1; // 岸邊一圈都算
+  }
+
+  // 池塘挖好：6 個位置直接可以種
+  grantPond(now: number): void {
+    for (let k = 0; k < POND_COUNT; k++) {
+      const p = this.plot(POND_START + k);
+      if (!p.owned) Object.assign(p, { owned: true, tilled: true, cropId: null, p0: 0, snapAt: now, wetUntil: 0, fert: false });
+    }
+  }
 
   tileOf(i: number): { x: number; z: number } {
+    if (i >= POND_START) {
+      const [dx, dz] = POND_OFFSETS[i - POND_START];
+      return { x: (this.pond?.x ?? 0) + dx, z: (this.pond?.z ?? 0) + dz };
+    }
     if (i >= FIELD_COUNT) {
       const [dx, dz] = GH_OFFSETS[i - FIELD_COUNT];
       return { x: (this.gh?.x ?? 0) + dx, z: (this.gh?.z ?? 0) + dz };
@@ -163,6 +197,7 @@ export class Farm {
   get ownedCount(): number { return this.state.data.plots.filter((p, i) => p.owned && i < FIELD_COUNT).length; }
   // 目前等級可以擁有幾塊（溫室田由溫室等級決定）
   canOwn(i: number): boolean {
+    if (i >= POND_START) return (this.state.data.pond?.level ?? 0) >= 1;
     if (i >= FIELD_COUNT) return i - FIELD_COUNT < ghPlotsFor(this.state.data.greenhouse?.level ?? 0);
     return this.rank(i) < plotsForLevel(this.state.data.level);
   }
@@ -252,7 +287,7 @@ export class Farm {
     if (!d) return 0;
     const span = d.night ? nightMs(p.snapAt, now) : Math.max(0, now - p.snapAt);
     const wet = d.night ? nightMs(p.snapAt, Math.min(now, p.wetUntil)) : Math.max(0, Math.min(now, p.wetUntil) - p.snapAt);
-    const eff = wet + (span - wet) * DRY_RATE;
+    const eff = (wet + (span - wet) * DRY_RATE) * (d.night ? this.nightBoost : 1);
     return Math.min(1, p.p0 + eff / this.growMs(i, d));
   }
 
@@ -356,8 +391,13 @@ export class Farm {
       const p = this.plot(i);
       const st = this.status(i, now);
       const own = p.owned;
-      // 溫室田：沒擴建到的不顯示；溫室有自動灑水，永遠不會乾
-      if (i >= FIELD_COUNT) {
+      // 溫室田、池塘：沒開放的不顯示；自動灑水（池塘本來就在水裡），永遠不會乾
+      if (i >= POND_START) {
+        v.group.visible = own;
+        v.grass.visible = v.soil.visible = v.sign.visible = v.label.visible = v.fert.visible = false;
+        if (!own) return;
+        if (p.cropId && p.wetUntil < now + 30000) this.water(i, now);
+      } else if (i >= FIELD_COUNT) {
         v.group.visible = own;
         if (!own) return;
         if (p.cropId && p.wetUntil < now + 30000) this.water(i, now);
@@ -367,6 +407,7 @@ export class Farm {
       v.grass.visible = !p.tilled || !own;
       v.soil.visible = p.tilled && own;
       v.fert.visible = own && p.fert && !!p.cropId;
+      if (i >= POND_START) v.grass.visible = v.soil.visible = v.sign.visible = v.fert.visible = false; // 池塘：只有作物浮在水面上
       // 標籤：未解鎖顯示等級、可購買顯示價格
       const key = !this.showSigns ? '' : st === 'locked' ? `Lv${this.unlockLevel(i)}` : st === 'forsale' ? `🪙${price}` : '';
       if (key !== v.labelKey) {
@@ -393,7 +434,7 @@ export class Farm {
         v.crop = null;
         if (d && stage >= 0) {
           v.crop = cropModel(d, stage);
-          v.crop.position.set(d.giant ? 1 : 0, 0.14, d.giant ? 1 : 0); // 巨型作物長在 3×3 的正中央
+          v.crop.position.set(d.giant ? 1 : 0, i >= POND_START ? POND_Y : 0.14, d.giant ? 1 : 0); // 巨型作物長在 3×3 的正中央
           v.crop.rotation.y = (i * 1.7) % (Math.PI * 2);
           v.group.add(v.crop);
           v.pop = 0;

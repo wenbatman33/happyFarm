@@ -1,6 +1,7 @@
 import { hashStr, mulberry32 } from '../core/rng';
 import { CROPS, CROP_BY_ID } from '../data/crops';
-import { MILK_SELL, MILK_XP } from '../data/economy';
+import { CAFE_MULT, HONEY_SELL, HONEY_XP, MILK_SELL, MILK_XP } from '../data/economy';
+import { FURN_BY_ID } from '../data/furniture';
 import { RECIPES, RECIPE_BY_ID } from '../data/recipes';
 import type { Game } from '../game';
 import { ITEM_INFO, type OrderCard } from '../ui/hud';
@@ -28,6 +29,7 @@ export class Orders {
     if (c) return { emoji: c.emoji, name: c.name, sell: c.sell, xp: c.xp };
     const it = ITEM_INFO[key];
     const r = RECIPE_BY_ID[key];
+    if (key === 'honey') return { emoji: '🍯', name: '蜂蜜', sell: HONEY_SELL, xp: HONEY_XP };
     return { emoji: it?.emoji ?? '📦', name: it?.name ?? key, sell: key === 'milk' ? MILK_SELL : it?.price ?? 1, xp: key === 'milk' ? MILK_XP : r ? r.xp : 5 };
   }
 
@@ -54,6 +56,28 @@ export class Orders {
     return { id, items, coins: Math.round(coins * 1.4), xp: Math.round(xp * 1.5), done: false };
   }
 
+  // 咖啡廳訂單（第 8 章）：2–3 樣加工品組合，價格 ×2.2，還附一份小禮物
+  private makeCafe(rand: () => number): OrderSave | null {
+    const d = this.game.state.data;
+    const pool = RECIPES.filter((r) => r.id !== 'windpart' && d.level >= r.unlock);
+    if (pool.length < 2) return null;
+    const picks = [...pool].sort(() => rand() - 0.5).slice(0, rand() < 0.5 ? 2 : 3);
+    const items = picks.map((r) => ({ key: r.id, n: 1 + Math.floor(rand() * 2) }));
+    let coins = 0, xp = 0;
+    for (const it of items) { const f = this.info(it.key); coins += f.sell * it.n; xp += f.xp * it.n; }
+    const r = rand();
+    const bonus = r < 0.15 ? 'giantseed:1' : r < 0.3 ? 'country_plant:1' : r < 0.6 ? 'fert:5' : 'hay:6';
+    return { id: `c${++this.d.seq}`, items, coins: Math.round(coins * CAFE_MULT), xp: Math.round(xp * 2), done: false, cafe: true, bonus };
+  }
+
+  bonusLabel(bonus: string): string {
+    const [k, n] = bonus.split(':');
+    const f = FURN_BY_ID[k];
+    if (f) return `${f.emoji} ${f.name}`;
+    const it = ITEM_INFO[k];
+    return `${it?.emoji ?? '🎁'} ${it?.name ?? k} ×${n}`;
+  }
+
   // 刷新：到了新的時段就換一批（新手引導中的第一批固定是蘿蔔 ×1）
   refresh(now: number): boolean {
     const slot = orderSlot(now);
@@ -63,6 +87,7 @@ export class Orders {
     const list: OrderSave[] = [];
     for (let i = 0; i < n; i++) list.push(this.make(rand));
     if (this.game.state.data.tutorial >= 0 && this.game.state.data.stats.ordersDone === 0) list[0] = this.priced([{ key: 'radish', n: 1 }], `o${++this.d.seq}`);
+    if (this.game.calendar?.chapterOpen(8, now)) { const c = this.makeCafe(rand); if (c) list.unshift(c); }
     this.d.slot = slot;
     this.d.list = list;
     this.d.seen = false;
@@ -92,6 +117,11 @@ export class Orders {
     o.done = true;
     st.data.coins += o.coins;
     st.data.stats.ordersDone++;
+    if (o.bonus) {
+      const [k, n] = o.bonus.split(':');
+      if (FURN_BY_ID[k]) this.game.interior.grant(k, Number(n));
+      else st.addItem(k, Number(n));
+    }
     return o;
   }
 
@@ -102,6 +132,7 @@ export class Orders {
     }
     const i = this.d.list.findIndex((x) => x.id === id);
     if (i < 0) return null;
+    if (this.d.list[i].cafe) return '咖啡廳的訂單不能換喔';
     this.d.list[i] = this.make(mulberry32(hashStr('skip' + now)));
     this.d.skipAt = now + ORDER_SKIP_MS;
     return null;
@@ -120,6 +151,8 @@ export class Orders {
       xp: o.xp,
       canDeliver: this.canDeliver(o),
       done: o.done,
+      cafe: o.cafe,
+      bonus: o.bonus ? this.bonusLabel(o.bonus) : undefined,
     }));
   }
 }

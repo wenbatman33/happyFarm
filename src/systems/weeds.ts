@@ -11,8 +11,8 @@ import type { GameState, WeedSave } from './state';
 // 雜草生長區（docs/03 §4.1）
 interface Zone { name: string; cap: number; tiles: () => Tile[] }
 
-export const PULLS: Record<WeedKind, number> = { sprout: 1, bush: 2, big: 3, dandelion: 1, leaves: 1, snow: 1 };
-export const WEED_LABEL: Record<WeedKind, string> = { sprout: '小草芽', bush: '雜草叢', big: '大草叢', dandelion: '蒲公英', leaves: '落葉堆', snow: '積雪' };
+export const PULLS: Record<WeedKind, number> = { sprout: 1, bush: 2, big: 3, dandelion: 1, leaves: 1, snow: 1, vine: 1 };
+export const WEED_LABEL: Record<WeedKind, string> = { sprout: '小草芽', bush: '雜草叢', big: '大草叢', dandelion: '蒲公英', leaves: '落葉堆', snow: '積雪', vine: '牆面藤蔓' };
 
 interface WeedView { group: THREE.Group; kind: WeedKind; tug: number; pop: number; shake: number }
 
@@ -29,11 +29,29 @@ export class Weeds {
       { name: 'house', cap: 10, tiles: () => this.ring(this.layout.house.x, this.layout.house.z, 3.5, 3.0, 5.2, 4.6) },
       { name: 'path', cap: 8, tiles: () => this.pathSides() },
       { name: 'fence', cap: 8, tiles: () => this.fenceEdge() },
+      // 房子正面牆上的藤蔓（要修枝剪才能剪，docs/03 §4.1）
+      { name: 'wall', cap: 4, tiles: () => this.wallSpots().map((p) => ({ x: Math.round(p.x), z: Math.round(p.z) })) },
       { name: 'field', cap: 10, tiles: () => { const iw = FIELD_COLS / 2, id = FIELD_ROWS / 2; return this.ring(this.layout.field.x + (FIELD_COLS - 1) / 2, this.layout.field.z + (FIELD_ROWS - 1) / 2, iw, id, iw + 1.1, id + 1.1); } },
     ];
   }
 
   get list(): WeedSave[] { return this.state.data.weeds; }
+
+  // 藤蔓長在房子正面牆上（窗戶兩側），位置是精確的牆面座標
+  wallSpots(): { x: number; z: number }[] {
+    const h = this.layout.house;
+    return [-2.6, -1.4, 1.4, 2.6].map((dx) => ({ x: h.x + dx, z: h.z + 2.3 }));
+  }
+
+  // 藤蔓在牆上，點地面對不到：用射線直接打藤蔓模型
+  rayVine(ray: THREE.Raycaster): string | null {
+    for (const w of this.list) {
+      if (w.kind !== 'vine') continue;
+      const v = this.views.get(w.id);
+      if (v && ray.intersectObject(v.group, true).length) return w.id;
+    }
+    return null;
+  }
 
   private free(x: number, z: number): boolean {
     return !this.grid.isBlocked(x, z) && !this.grid.path[this.grid.idx(x, z)] && this.farm.indexAt(x, z) < 0 && !this.extraBlocked?.(x, z);
@@ -82,6 +100,13 @@ export class Weeds {
     const tiles = zone.tiles().filter((t) => !taken.has(`${t.x},${t.z}`));
     if (!tiles.length) return null;
     const t = tiles[Math.floor(rand() * tiles.length)];
+    if (zone.name === 'wall') {
+      const sp = this.wallSpots().find((p) => Math.round(p.x) === t.x && Math.round(p.z) === t.z)!;
+      const d = this.state.data;
+      const w: WeedSave = { id: `w${++d.weedSeq}`, tx: t.x, tz: t.z, ox: sp.x - t.x, oz: sp.z - t.z, kind: 'vine', bornAt, pulls: PULLS.vine, zone: 'wall' };
+      this.list.push(w);
+      return w;
+    }
     const r = rand();
     // 季節雜草：春天蒲公英、秋天落葉堆、冬天積雪
     let kind: WeedKind = 'sprout';
@@ -98,7 +123,7 @@ export class Weeds {
   // 新遊戲：房子周圍長滿草（新手教學用）
   seedInitial(now: number, season: Season): void {
     const rand = mulberry32(hashStr('init' + now));
-    const plan: [string, number][] = [['house', 10], ['path', 4], ['field', 4], ['fence', 5]];
+    const plan: [string, number][] = [['house', 10], ['path', 4], ['field', 4], ['fence', 5], ['wall', 2]];
     for (const [name, n] of plan) {
       const z = this.zones.find((zz) => zz.name === name)!;
       for (let i = 0; i < n; i++) {
@@ -147,6 +172,12 @@ export class Weeds {
     return w;
   }
 
+  // DEV：在指定區域長一株（例如牆上的藤蔓）
+  forceSpawnZone(name: string, now: number): void {
+    const z = this.zones.find((zz) => zz.name === name);
+    if (z) this.spawn(z, now, 'spring', mulberry32(hashStr(name + now + this.list.length)));
+  }
+
   forceSpawn(n: number, now: number, season: Season, kind?: WeedKind): void {
     const rand = mulberry32(hashStr('dev' + now));
     for (let i = 0; i < n; i++) this.spawn(this.zones[i % this.zones.length], now, season, rand, kind);
@@ -178,7 +209,7 @@ export class Weeds {
       if (!v) {
         const group = buildWeed(w.kind, hashStr(w.id));
         group.position.set(w.tx + w.ox, 0, w.tz + w.oz);
-        group.rotation.y = hashStr(w.id) % 6;
+        group.rotation.y = w.kind === 'vine' ? 0 : hashStr(w.id) % 6; // 藤蔓貼著牆，不能轉
         this.root.add(group);
         v = { group, kind: w.kind, tug: 0, pop: 0, shake: 0 };
         this.views.set(w.id, v);

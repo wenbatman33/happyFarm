@@ -5,6 +5,7 @@ import { bondLevel } from '../data/economy';
 import { GEO, mat, mesh } from '../world/materials';
 import type { Game } from '../game';
 import type { MouseSave } from './state';
+import { FIELD_COUNT } from './farm';
 
 // 寵物技能（docs/02 §2）＋田鼠事件
 // 技能等級：親密度 1–3 → Lv1、4–6 → Lv2、7+ → Lv3，等級越高越勤勞
@@ -168,7 +169,7 @@ export class PetSkills {
     this.spawnT -= dt;
     if (this.spawnT <= 0) {
       this.spawnT = 45;
-      const growing = [...Array(g.farm.count).keys()].filter((i) => { const s = g.farm.status(i, now); return !g.farm.isGH(i) && (s === 'growing' || s === 'dry') && !this.mice.some((m) => m.plot === i); });
+      const growing = [...Array(g.farm.count).keys()].filter((i) => { const s = g.farm.status(i, now); return i < FIELD_COUNT && (s === 'growing' || s === 'dry') && !this.mice.some((m) => m.plot === i); });
       if (growing.length && this.mice.length < 2 && Math.random() < 0.14) {
         const plot = growing[Math.floor(Math.random() * growing.length)];
         const sd = g.state.data;

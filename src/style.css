@@ -359,3 +359,15 @@ body.indoor [data-hud='event'], body.editing [data-hud='bag'] { display: none !i
   .ft-item { width: 60px; }
   .ft-item .em { font-size: 22px; }
 }
+
+/* ---------- M6：流星許願、咖啡廳訂單、服裝 ---------- */
+#wish-btn { position: fixed; left: 50%; top: 32%; transform: translateX(-50%); z-index: 22; padding: 12px 22px; border-radius: 26px; font-weight: 800; font-size: 18px; color: #3a2a6a; background: linear-gradient(#fffbe0, #ffe08a); box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.5), 0 0 30px rgba(255, 230, 140, 0.8), var(--shadow); animation: wishpop 0.4s cubic-bezier(.3,1.6,.6,1), wishglow 1.2s ease-in-out infinite; }
+@keyframes wishpop { from { transform: translateX(-50%) scale(0.3); opacity: 0; } }
+@keyframes wishglow { 50% { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.35), 0 0 50px rgba(255, 230, 140, 1), var(--shadow); } }
+.order.cafe { background: #fff6ea; box-shadow: inset 0 -4px 0 #e8cfa8, 0 0 0 2px #c9935a; }
+.ord-cafe { font-weight: 800; font-size: 13px; color: #8a5a2a; }
+.ws-recipe.on { background: #fff4c9; box-shadow: inset 0 -3px 0 #f0d27a, 0 0 0 2px var(--gold); }
+#meteor { position: fixed; z-index: 21; width: 260px; height: 4px; border-radius: 4px; pointer-events: none; opacity: 0; background: linear-gradient(90deg, #ffffff 0%, rgba(255, 246, 200, 0.85) 12%, rgba(200, 225, 255, 0) 100%); transform: rotate(-22deg); filter: drop-shadow(0 0 8px #fff6c8); }
+#meteor::before { content: ''; position: absolute; left: -6px; top: -5px; width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(#fff, rgba(255, 246, 200, 0)); }
+#meteor.go { animation: meteor 1.5s cubic-bezier(.2,.6,.4,1) forwards; }
+@keyframes meteor { 0% { opacity: 0; transform: translate(0, 0) rotate(-22deg); } 12% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-55vw, 22vw) rotate(-22deg); } }

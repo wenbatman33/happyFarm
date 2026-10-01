@@ -6,13 +6,22 @@ import type { Season } from '../core/clock';
 import { mulberry32 } from '../core/rng';
 import { GEO, mat, mesh, withWind } from './materials';
 import type { Grid } from './grid';
-import { GrassField } from './grass';
+import { GrassField, grassGroundTexture } from './grass';
 import { TreeMats, buildTree, clumpGeo, setTreeSeason, type TreeParts } from './trees3d';
 import type { FestivalId } from '../data/festivals';
 import { Kit, bake, buildFestival, lightString, stick, type Deco, type GlowMat, type HouseFest } from './festive3d';
 import { GH_WALL_X, GH_WALL_Z, buildGreenhouse } from './greenhouse3d';
 import { MARKET_D, MARKET_W, buildMarket, type MarketKind } from './market3d';
 import { FIELD_COLS, FIELD_ROWS } from '../systems/farm';
+import { clock } from '../core/clock';
+import {
+  POND_BUILD_BLOCK, POND_RX, POND_RZ, POND_SIGN, PondFx, buildBeehive, buildHiveStand, buildPetHouse, buildPond, buildTelescope,
+  inPondEllipse, paintPondHollow, pondClearsGrass, pondUniforms, updateBeehive, updateTelescope,
+} from './props3d';
+
+export { POND_WATER_Y } from './props3d';
+// 蜂箱位置的狀態：none = 尚未解鎖（什麼都沒有）、empty = 空木架＋小木牌、hive = 完整蜂箱＋蜜蜂
+export type HiveSlot = 'none' | 'empty' | 'hive';
 
 const rbox = (w: number, h: number, d: number, r = 0.06, seg = 2) => new RoundedBoxGeometry(w, h, d, seg, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
 
@@ -71,6 +80,18 @@ export class World {
   private wreath: THREE.Group | null = null;
   workshopBusy = false;
   private wsSmokeT = 0;
+  // 池塘（Lv30）
+  pondLevel: 0 | 1 = 0;
+  pondBuilding = false;
+  private pond: { group: THREE.Object3D; hit: THREE.Object3D } | null = null;
+  private pondFx = new PondFx();
+  // 寵物小屋、蜂箱、望遠鏡
+  petHouseTier: 1 | 2 = 1;
+  beehiveSlots: HiveSlot[] = [];
+  beehiveReady: boolean[] = []; // 由蜂箱系統每幀設定：哪一格的蜂蜜可以收
+  private hives: (THREE.Group | null)[] = [];
+  telescopeOn = false;
+  private telescope: THREE.Group | null = null;
   onRebuildGrid?: () => void; // 讓其他系統（障礙物）補上自己的阻擋格
 
   constructor(scene: THREE.Scene, private grid: Grid, private layout: SceneLayout) {
@@ -89,6 +110,8 @@ export class World {
     layout.trees.forEach((t, i) => this.addProp(`tree${i}`, this.makeTree(i), t));
     layout.rocks.forEach((r, i) => this.addProp(`rock${i}`, this.makeRock(i), r));
     this.placeGreenhouse();
+    this.root.add(this.pondFx.group);
+    this.placePond();
     this.rebuildGrid();
     this.buildGrass();
     this.applyGrassMask();
@@ -125,7 +148,8 @@ export class World {
     else g.blockRect(L.house.x, L.house.z, 6 * L.house.scale, 5 * L.house.scale);
     if (this.houseTier >= 5) { const w = this.houseToWorld(WINDMILL.x, WINDMILL.z); g.blockRect(w.x, w.z, 2.0, 2.0); } // 風車塔
     g.blockRect(L.workshop.x, L.workshop.z, 2.6, 2.2);
-    g.blockRect(L.doghouse.x, L.doghouse.z, 1.3, 1.3);
+    if (this.petHouseTier >= 2) this.blockRotRect(L.doghouse, 2.2 * L.doghouse.scale, 1.8 * L.doghouse.scale);
+    else g.blockRect(L.doghouse.x, L.doghouse.z, 1.3, 1.3);
     g.blockRect(L.mailbox.x, L.mailbox.z, 0.3, 0.3);
     g.blockRect(L.compost.x, L.compost.z, 0.6, 0.6);
     L.trees.forEach((t) => g.blockRect(t.x, t.z, 0.4, 0.4));
@@ -150,6 +174,9 @@ export class World {
     g.blockRect(rx - 1.6, rz - 1.35, 1.6, 0.6); // 穀倉
     g.blockRect(rx - 3.9, rz - 1.8, 0.3, 0.3); // 乾草堆
     this.blockGreenhouse();
+    this.blockPond();
+    L.beehives.forEach((h, i) => { if (this.beehiveSlots[i] === 'hive') g.blockRect(h.x, h.z, 0.6, 0.6); });
+    if (this.telescopeOn) g.blockRect(L.telescope.x, L.telescope.z, 0.8, 0.8);
     if (this.marketKind !== 'none') this.blockRotRect(L.market, MARKET_W, MARKET_D);
     for (const [x, z] of this.festDeco?.block ?? []) if (g.inBounds(x, z)) g.blocked[g.idx(x, z)] = 1;
     this.onRebuildGrid?.();
@@ -163,7 +190,7 @@ export class World {
     const L = this.layout;
     const gh = this.greenhouseLevel >= 1 || this.greenhouseBuilding;
     const mk = this.marketKind !== 'none';
-    this.grassField.applyMask((x, z) => g.isBlocked(Math.round(x), Math.round(z)) || this.noGrassAt(x, z) ||
+    this.grassField.applyMask((x, z) => g.isBlocked(Math.round(x), Math.round(z)) || this.noGrassAt(x, z) || this.pondNoGrass(x, z) ||
       (gh && this.inRotRect(L.greenhouse, x, z, GH_WALL_X * 2, GH_WALL_Z * 2)) ||
       (mk && this.inRotRect(L.market, x, z, MARKET_W, MARKET_D)));
   }
@@ -210,6 +237,144 @@ export class World {
       if (dx === 0 && dz === 2) continue; // 門口
       block(dx, dz);
     }
+  }
+
+  // ---------- 池塘（Lv30） ----------
+  // 世界座標 → 池塘本地座標（含旋轉、縮放）
+  private pondLocal(x: number, z: number): [number, number] {
+    const p = this.layout.pond, c = Math.cos(p.rotY), s = Math.sin(p.rotY);
+    const dx = (x - p.x) / p.scale, dz = (z - p.z) / p.scale;
+    return [dx * c - dz * s, dx * s + dz * c];
+  }
+
+  private pondToWorld(lx: number, lz: number): { x: number; z: number } {
+    const p = this.layout.pond, c = Math.cos(p.rotY), s = Math.sin(p.rotY);
+    return { x: p.x + (lx * c + lz * s) * p.scale, z: p.z + (-lx * s + lz * c) * p.scale };
+  }
+
+  private pondNoGrass(x: number, z: number): boolean {
+    const [lx, lz] = this.pondLocal(x, z);
+    if (Math.abs(lx) > POND_RX * 1.5 || Math.abs(lz) > POND_RZ * 1.6) return false;
+    return pondClearsGrass(lx, lz, this.pondLevel, this.pondBuilding);
+  }
+
+  // 有水（或施工中的坑）：中心落在水面橢圓 ×1.05 內的格子都擋住，岸邊一圈可以走；預定地只擋木牌那格
+  private blockPond(): void {
+    const g = this.grid, p = this.layout.pond;
+    const block = (x: number, z: number) => { if (g.inBounds(x, z)) g.blocked[g.idx(x, z)] = 1; };
+    const atLocal = (lx: number, lz: number) => { const w = this.pondToWorld(lx, lz); block(Math.round(w.x), Math.round(w.z)); };
+    if (this.pondLevel >= 1 || this.pondBuilding) {
+      const r = Math.ceil(POND_RX * 1.05 * p.scale) + 1;
+      for (let z = Math.round(p.z) - r; z <= Math.round(p.z) + r; z++) for (let x = Math.round(p.x) - r; x <= Math.round(p.x) + r; x++) {
+        const [lx, lz] = this.pondLocal(x, z);
+        if (inPondEllipse(lx, lz, 1.05)) block(x, z);
+      }
+    }
+    if (this.pondLevel < 1) atLocal(POND_SIGN[0], POND_SIGN[1]);
+    if (this.pondLevel < 1 && this.pondBuilding) for (const [lx, lz] of POND_BUILD_BLOCK) atLocal(lx, lz);
+  }
+
+  // level 0 = 預定地；building = 挖池塘中；1 = 有水的池塘
+  setPond(level: 0 | 1, building = false): void {
+    this.pondLevel = level >= 1 ? 1 : 0;
+    this.pondBuilding = building;
+    this.placePond();
+    this.rebuildGrid();
+  }
+
+  private placePond(): void {
+    if (this.pond) {
+      this.root.remove(this.pond.group);
+      this.interactive = this.interactive.filter((o) => o !== this.pond!.hit);
+    }
+    const d = buildPond(this.pondLevel, this.pondBuilding);
+    const L = this.layout.pond;
+    d.group.position.set(L.x, 0, L.z);
+    d.group.rotation.y = L.rotY;
+    d.group.scale.setScalar(L.scale);
+    this.root.add(d.group);
+    this.interactive.push(d.hit);
+    this.glowSets.set('pond', d.glow);
+    this.pond = { group: d.group, hit: d.hit };
+    const pal = SEASON_PALETTE[this.season];
+    paintPondHollow(d.group, pal.ground, pal.ground2);
+    this.pondFx.setPond(L.x, L.z, L.rotY, L.scale, this.pondLevel >= 1);
+  }
+
+  // 水面上 (x,z) 冒出一圈往外擴散的漣漪（鴨子游泳、種／收蓮花時呼叫）
+  pondRipple(x: number, z: number, size = 1): void {
+    this.pondFx.ripple(x, z, size);
+  }
+
+  // ---------- 寵物小屋、蜂箱、望遠鏡 ----------
+  setPetHouseTier(tier: 1 | 2): void {
+    const t: 1 | 2 = tier >= 2 ? 2 : 1;
+    if (t === this.petHouseTier) return;
+    this.petHouseTier = t;
+    const entry = this.props.get('doghouse')!;
+    this.root.remove(entry.obj);
+    this.interactive = this.interactive.filter((o) => o !== entry.obj);
+    const h = this.makeDoghouse();
+    h.userData.propKey = 'doghouse';
+    entry.obj = h;
+    this.root.add(h);
+    this.placeProp('doghouse');
+    this.rebuildGrid();
+  }
+
+  // 每個 SCENE_LAYOUT.beehives 位置一個狀態；只有變動的位置會重建
+  setBeehives(slots: HiveSlot[]): void {
+    const L = this.layout.beehives;
+    let changed = false;
+    L.forEach((p, i) => {
+      const want: HiveSlot = slots[i] ?? 'none';
+      if (this.beehiveSlots[i] === want && (want === 'none') === !this.hives[i]) return;
+      changed = true;
+      const old = this.hives[i];
+      if (old) {
+        this.root.remove(old);
+        this.interactive = this.interactive.filter((o) => o !== old);
+      }
+      this.hives[i] = null;
+      this.beehiveSlots[i] = want;
+      if (want === 'none') return;
+      const o = want === 'hive' ? buildBeehive() : buildHiveStand();
+      o.userData.kind = 'beehive';
+      o.userData.slot = i;
+      o.userData.hive = want;
+      o.position.set(p.x, 0, p.z);
+      o.rotation.y = p.rotY;
+      o.scale.setScalar(p.scale);
+      this.root.add(o);
+      this.interactive.push(o);
+      this.hives[i] = o;
+    });
+    while (this.beehiveReady.length < L.length) this.beehiveReady.push(false);
+    if (changed) this.rebuildGrid();
+  }
+
+  setTelescope(on: boolean): void {
+    if (on === this.telescopeOn) return;
+    this.telescopeOn = on;
+    if (this.telescope) {
+      this.root.remove(this.telescope);
+      this.interactive = this.interactive.filter((o) => o !== this.telescope);
+      this.telescope = null;
+      this.glowSets.delete('telescope');
+    }
+    if (on) {
+      const t = buildTelescope();
+      t.userData.kind = 'telescope';
+      const p = this.layout.telescope;
+      t.position.set(p.x, 0, p.z);
+      t.rotation.y = p.rotY;
+      t.scale.setScalar(p.scale);
+      this.root.add(t);
+      this.interactive.push(t);
+      this.glowSets.set('telescope', t.userData.glow);
+      this.telescope = t;
+    }
+    this.rebuildGrid();
   }
 
   // ---------- 溫室（Lv40） ----------
@@ -309,7 +474,10 @@ export class World {
     }
     this.groundGeo.computeVertexNormals();
     this.groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(pos.count * 3), 3));
-    const ground = new THREE.Mesh(this.groundGeo, mat('#ffffff', { vertexColors: true, roughness: 0.95 }));
+    // 草的細節畫在地面貼圖上（4 公尺一塊拼接；有 mipmap，遠近都不會閃）
+    const tex = grassGroundTexture();
+    tex.repeat.set(220 / 4, 220 / 4);
+    const ground = new THREE.Mesh(this.groundGeo, mat('#ffffff', { vertexColors: true, roughness: 0.95, map: tex }));
     ground.receiveShadow = true;
     ground.userData.ground = true;
     this.root.add(ground);
@@ -352,7 +520,7 @@ export class World {
     const L = this.layout;
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     // 靜態排除：田區、小徑、房屋本體（其餘由 applyGrassMask 動態隱藏）
-    this.grassField = new GrassField(coarse ? 11000 : 22000, coarse ? 2500 : 5000, (x, z) =>
+    this.grassField = new GrassField(coarse ? 1100 : 2000, coarse ? 400 : 700, (x, z) =>
       (Math.abs(x - L.house.x) < 3.8 && Math.abs(z - L.house.z) < 3.4) ||
       (x > L.field.x - 0.9 && x < L.field.x + FIELD_COLS - 0.1 && z > L.field.z - 0.9 && z < L.field.z + FIELD_ROWS - 0.1) ||
       (Math.abs(x - L.house.x) < 0.9 && z > L.house.z));
@@ -373,6 +541,7 @@ export class World {
       const x = nearHouse ? L.house.x + (rand() - 0.5) * 7 : (rand() < 0.5 ? -1 : 1) * (12.4 + rand() * 1.2);
       const z = nearHouse ? L.house.z + 2.9 + rand() * 0.8 : (rand() - 0.5) * 26;
       if (nearHouse && Math.abs(x - L.house.x) < 1.9) { i--; continue; }
+      if (!nearHouse && inPondEllipse(...this.pondLocal(x, z), 1.45)) { i--; continue; } // 池塘一帶不長小花
       const sc = 0.8 + rand() * 0.6;
       m.compose(v.set(x, 0, z), q.identity(), s.set(sc, sc, sc));
       this.flowers.setMatrixAt(i, m);
@@ -400,6 +569,7 @@ export class World {
     this.season = season;
     const p = SEASON_PALETTE[season];
     this.paintGround(p);
+    if (this.pond) paintPondHollow(this.pond.group, p.ground, p.ground2);
     this.grassField.setSeason(p, season);
     this.treeMats.setSeason(p.leaves);
     this.trees.forEach((t) => setTreeSeason(t, season));
@@ -1345,32 +1515,13 @@ export class World {
     return g;
   }
 
+  // 寵物小屋：tier 1 原本的狗屋、tier 2 升級版（props3d）
   private makeDoghouse(): THREE.Group {
-    const g = new THREE.Group();
+    const g = buildPetHouse(this.petHouseTier);
     g.userData.kind = 'doghouse';
     this.interactive.push(g);
-    const body = mesh(rbox(1.2, 0.9, 1.2, 0.1), mat('#d4764c'));
-    body.position.y = 0.45;
-    g.add(body);
-    for (const s of [1, -1]) {
-      const r = mesh(rbox(1.5, 0.12, 0.95, 0.05), mat('#5b84c4'));
-      r.position.set(0, 1.12, s * 0.32);
-      r.rotation.x = s * 0.62;
-      g.add(r);
-    }
-    const tri = new THREE.Shape();
-    tri.moveTo(-0.6, 0); tri.lineTo(0.6, 0); tri.lineTo(0, 0.5); tri.closePath();
-    const t = mesh(new THREE.ExtrudeGeometry(tri, { depth: 1.1, bevelEnabled: false }), mat('#d4764c'));
-    t.position.set(0, 0.9, -0.55);
-    g.add(t);
-    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.3, 20, 0, Math.PI), mat('#2a1c18', { roughness: 1 }));
-    hole.position.set(0, 0.12, 0.61);
-    const holeLo = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.25), hole.material);
-    holeLo.position.set(0, 0.12, 0.611);
-    hole.position.y = 0.24;
-    const plate = mesh(rbox(0.5, 0.16, 0.04, 0.02), mat('#f3e7d3'), false);
-    plate.position.set(0, 0.72, 0.62);
-    g.add(hole, holeLo, plate);
+    if (g.userData.glow) this.glowSets.set('pethouse', g.userData.glow);
+    else this.glowSets.delete('pethouse');
     return g;
   }
 
@@ -1453,6 +1604,16 @@ export class World {
       }
       pos.needsUpdate = true;
     }
+    // 池塘：夜晚水色、漣漪與魚跳
+    pondUniforms.uNight.value = glow;
+    this.pondFx.update(dt, t, glow);
+    // 蜜蜂白天（6–19 點、非冬天）才出來；望遠鏡夜晚慢慢掃天空
+    if (this.hives.length) {
+      const hr = clock.hour();
+      const beesOut = hr >= 6 && hr < 19 && this.season !== 'winter';
+      this.hives.forEach((h, i) => { if (h && this.beehiveSlots[i] === 'hive') updateBeehive(h, t, beesOut, !!this.beehiveReady[i]); });
+    }
+    if (this.telescope) updateTelescope(this.telescope, t, glow);
     for (const c of this.clouds) {
       c.position.x += c.userData.speed * dt;
       if (c.position.x > 130) c.position.x = -130;

@@ -630,10 +630,247 @@ function buildRoot2(g: THREE.Group, s: Shape<'root'>, grown: boolean): void {
   }
 }
 
+// ── 水生作物：原點＝水面，全部浮在水上（最低不低於 -0.05）──
+
+// 睡蓮葉：單位半徑的圓葉＋一道缺口，中心淺、邊緣深，隔一條輻射線亮一點（葉脈）；邊緣微微上翹
+let padGeoCache: THREE.BufferGeometry | null = null;
+export function lilyPadGeo(): THREE.BufferGeometry {
+  if (padGeoCache) return padGeoCache;
+  const N = 28, notch = 0.46;
+  const pos: number[] = [], nor: number[] = [], col: number[] = [], idx: number[] = [];
+  const cC = new THREE.Color('#9be07a'), cM = new THREE.Color('#5cb84a'), cV = new THREE.Color('#86d464'), cR = new THREE.Color('#3f9a3a'), cS = new THREE.Color('#2f7a2e');
+  const push = (x: number, y: number, z: number, c: THREE.Color, nx = 0, ny = 1, nz = 0) => { pos.push(x, y, z); nor.push(nx, ny, nz); col.push(c.r, c.g, c.b); return pos.length / 3 - 1; };
+  push(0, 0.012, 0, cC);
+  for (let i = 0; i <= N; i++) {
+    const a = notch / 2 + (i / N) * (Math.PI * 2 - notch);
+    push(Math.cos(a) * 0.55, 0.012, Math.sin(a) * 0.55, i % 2 ? cM : cV);
+    push(Math.cos(a), 0.024, Math.sin(a), cR);
+  }
+  for (let i = 0; i < N; i++) {
+    const m0 = 1 + i * 2, r0 = m0 + 1, m1 = m0 + 2, r1 = m0 + 3;
+    idx.push(0, m1, m0, m0, m1, r1, m0, r1, r0);
+  }
+  // 葉緣側邊：深綠色的一圈薄邊
+  const base = pos.length / 3;
+  for (let i = 0; i <= N; i++) {
+    const a = notch / 2 + (i / N) * (Math.PI * 2 - notch);
+    const c = Math.cos(a), s = Math.sin(a);
+    push(c, 0.024, s, cS, c, 0, s);
+    push(c, 0, s, cS, c, 0, s);
+  }
+  for (let i = 0; i < N; i++) {
+    const t0 = base + i * 2, b0 = t0 + 1, t1 = t0 + 2, b1 = t0 + 3;
+    idx.push(t0, t1, b1, t0, b1, b0);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  return (padGeoCache = g);
+}
+
+let padMatCache: THREE.MeshStandardMaterial | null = null;
+export function lilyPadMat(): THREE.MeshStandardMaterial {
+  return padMatCache ??= withWind(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, side: THREE.DoubleSide }), 0.05);
+}
+
+// 一片浮葉：半徑 r，y 為離水面的高度（疊在一起時錯開一點避免閃爍）
+function pad(g: THREE.Object3D, r: number, x: number, y: number, z: number, rotY: number): THREE.Mesh {
+  const p = mesh(lilyPadGeo(), lilyPadMat());
+  p.scale.set(r, Math.min(1, r * 3.5), r);
+  p.position.set(x, y, z);
+  p.rotation.y = rotY;
+  return (g.add(p), p);
+}
+
+// 蓮花花瓣：尖頭、微微內凹的長橢圓，根部白、瓣尖粉紅（頂點色）；原點在花瓣根部，往 +y 長
+const petalCache = new Map<string, THREE.BufferGeometry>();
+function lotusPetalGeo(tip: string): THREE.BufferGeometry {
+  let g = petalCache.get(tip);
+  if (g) return g;
+  g = new THREE.SphereGeometry(0.5, 12, 10);
+  const p = g.attributes.position as THREE.BufferAttribute;
+  const cb = new THREE.Color('#fff4f8'), ct = new THREE.Color(tip), c = new THREE.Color();
+  const col: number[] = [];
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const t = y + 0.5; // 0 根部 → 1 瓣尖
+    const taper = 1 - Math.pow(Math.max(0, y / 0.5), 1.6) * 0.92;
+    p.setXYZ(i, x * taper, y + 0.5, z * taper * 0.38 - t * t * 0.16);
+    c.copy(cb).lerp(ct, Math.min(1, Math.pow(t, 1.4) * 1.15));
+    col.push(c.r, c.g, c.b);
+  }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  petalCache.set(tip, g);
+  return g;
+}
+const petalMatCache = new Map<string, THREE.MeshStandardMaterial>();
+const petalMat = (key: string) => {
+  let m = petalMatCache.get(key);
+  if (!m) petalMatCache.set(key, (m = withWind(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, emissive: '#ff8fb8', emissiveIntensity: 0.06 }), 0.08)));
+  return m;
+};
+
+// 一圈花瓣：中心在 (x,y,z)，n 片，往外傾 tilt（0 = 直立），尺寸 w×h
+function petalRing(g: THREE.Object3D, tip: string, x: number, y: number, z: number, n: number, tilt: number, w: number, h: number, off = 0): void {
+  const geo = lotusPetalGeo(tip), m = petalMat(tip);
+  for (let i = 0; i < n; i++) {
+    const p = mesh(geo, m, false);
+    p.scale.set(w, h, w);
+    p.position.set(x, y, z);
+    p.rotation.order = 'YXZ';
+    p.rotation.set(tilt, (i / n) * Math.PI * 2 + off, 0);
+    g.add(p);
+  }
+}
+
+// 蓮蓬：倒圓錐，平頂上有幾個深色小孔
+function seedPod(g: THREE.Object3D, x: number, y: number, z: number, k: number, color = '#9aa84a'): void {
+  part(g, GEO.cone, cm(color, 0, 0.6), 0.16 * k, 0.12 * k, 0.16 * k, x, y, z).rotation.x = Math.PI;
+  part(g, GEO.cyl, cm('#c9cf72', 0, 0.6), 0.16 * k, 0.012, 0.16 * k, x, y + 0.06 * k, z, false);
+  for (let i = 0; i < 3; i++) part(g, GEO.sphereLo, cm('#5a4a2a', 0, 0.8), 0.025 * k, 0.012, 0.025 * k, x + Math.cos(i * 2.1) * 0.035 * k, y + 0.066 * k, z + Math.sin(i * 2.1) * 0.035 * k, false);
+}
+
+const STAMEN_GEO = new THREE.TorusGeometry(0.5, 0.18, 6, 16); // 花心外圈的雄蕊
+
+function buildLotus(g: THREE.Group, s: Shape<'aquatic'>, stage: number): void {
+  const stemM = cm('#5f9e3a', 0.15, 0.55);
+  if (stage === 0) {
+    // 浮在水面的小蓮蓬＋一片小圓葉
+    seedPod(g, 0.02, 0.03, 0.0, 0.75, '#8a9a4a');
+    pad(g, 0.09, -0.1, 0.004, 0.07, 1.2);
+    return;
+  }
+  if (stage === 1) {
+    // 兩片小浮葉＋一支剛捲起來冒出水面的嫩葉
+    pad(g, 0.13, -0.06, 0.004, 0.04, 0.3);
+    pad(g, 0.1, 0.12, 0.008, -0.06, 2.6);
+    part(g, GEO.cone, cm('#7fc85a', 0.2), 0.05, 0.16, 0.05, 0.04, 0.08, 0.08).rotation.z = -0.15;
+    return;
+  }
+  const grown = stage === 3;
+  // 浮葉：成熟 4 片大圓葉，成長中 3 片
+  const pads: [number, number, number, number][] = grown
+    ? [[-0.17, 0.12, 0.27, 0.4], [0.2, 0.14, 0.23, 2.2], [0.04, -0.21, 0.29, 4.4], [-0.27, -0.16, 0.18, 5.6]]
+    : [[-0.12, 0.08, 0.2, 0.4], [0.15, 0.1, 0.16, 2.2], [0.02, -0.15, 0.18, 4.4]];
+  pads.forEach(([x, z, r, ry], i) => pad(g, r, x, 0.004 + i * 0.004, z, ry));
+  // 挺出水面的一片荷葉（微微傾斜的杯狀）
+  const lx = grown ? 0.24 : 0.17, lz = grown ? -0.2 : -0.14, lh = grown ? 0.32 : 0.22;
+  rod(g, stemM, 0.08, 0, -0.05, lx, lh, lz, 0.025);
+  const up = pad(g, grown ? 0.17 : 0.12, lx, lh, lz, 1.0);
+  up.rotation.set(0.35, 1.0, -0.25);
+  const tip = s.flower;
+  if (!grown) {
+    // 含苞：長莖頂著合起來的粉紅花苞
+    rod(g, stemM, 0, 0, 0.02, -0.02, 0.36, 0.05, 0.03);
+    petalRing(g, tip, -0.02, 0.35, 0.05, 4, 0.14, 0.13, 0.17);
+    part(g, GEO.sphereLo, cm('#6aa84a', 0.1), 0.06, 0.04, 0.06, -0.02, 0.36, 0.05, false);
+    return;
+  }
+  // 盛開：長莖、兩層尖花瓣、黃色蓮蓬花心＋一圈雄蕊
+  const fx = -0.02, fy = 0.5, fz = 0.06;
+  rod(g, stemM, 0, 0, 0.02, fx, fy, fz, 0.032);
+  petalRing(g, tip, fx, fy - 0.01, fz, 8, 1.05, 0.15, 0.2, 0.2);
+  petalRing(g, tip, fx, fy, fz, 6, 0.5, 0.13, 0.17, 0.55);
+  part(g, GEO.cyl, cm('#e8d84a', 0, 0.5), 0.075, 0.05, 0.075, fx, fy + 0.05, fz, false);
+  part(g, STAMEN_GEO, cm('#ffc93a', 0, 0.5), 0.13, 0.13, 0.13, fx, fy + 0.045, fz, false).rotation.x = Math.PI / 2;
+  // 旁邊一支已結果的蓮蓬
+  rod(g, stemM, -0.05, 0, -0.04, -0.2, 0.38, -0.1, 0.022);
+  seedPod(g, -0.2, 0.4, -0.1, 0.8);
+}
+
+// 西洋菜：一片浮在水面、層層疊疊的亮綠小圓葉＋往上挺的嫩枝（葉子全部合併成一個幾何，依階段快取）
+// 嫩枝位置：[根部 x, z, 頂端 x, z, 高度]
+function cressSprigs(stage: number): [number, number, number, number, number][] {
+  if (stage < 2) return [];
+  const n = stage === 3 ? 6 : 3, out: [number, number, number, number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const a = i * 2.4 + 0.4, r = 0.05 + (i % 3) * 0.07;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    out.push([x, z, x * 1.5 + Math.cos(a) * 0.03, z * 1.5 + Math.sin(a) * 0.03, (stage === 3 ? 0.17 : 0.11) + rnd(i + 20) * 0.05]);
+  }
+  return out;
+}
+const cressCache = new Map<string, THREE.BufferGeometry>();
+function cressGeo(stage: number, leafColor: string): THREE.BufferGeometry {
+  const key = stage + leafColor;
+  let g = cressCache.get(key);
+  if (g) return g;
+  const n = [6, 18, 40, 72][stage], R = [0.09, 0.17, 0.27, 0.36][stage], H = [0.004, 0.018, 0.045, 0.08][stage];
+  const base = new THREE.Color(leafColor);
+  const tones = [base.clone(), base.clone().lerp(new THREE.Color('#a8f060'), 0.35), base.clone().lerp(new THREE.Color('#1f7a26'), 0.4), base.clone().lerp(new THREE.Color('#d8ff80'), 0.2)];
+  const pos: number[] = [], col: number[] = [], idx: number[] = [];
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const SEG = 12;
+  // 一片小圓葉：中心微微隆起、邊緣深一點
+  const disc = (x: number, y: number, z: number, r: number, rx: number, ry: number, rz: number, c: THREE.Color) => {
+    m.compose(v.set(x, y, z), q.setFromEuler(e.set(rx, ry, rz)), sc.set(r, r, r * 0.9));
+    const b = pos.length / 3;
+    const p0 = new THREE.Vector3(0, 0.18, 0).applyMatrix4(m);
+    pos.push(p0.x, p0.y, p0.z);
+    col.push(Math.min(1, c.r * 1.2), Math.min(1, c.g * 1.2), Math.min(1, c.b * 1.2));
+    for (let k = 0; k <= SEG; k++) {
+      const t = (k / SEG) * Math.PI * 2;
+      const pk = new THREE.Vector3(Math.cos(t), 0, Math.sin(t)).applyMatrix4(m);
+      pos.push(pk.x, pk.y, pk.z);
+      col.push(c.r * 0.72, c.g * 0.72, c.b * 0.72);
+    }
+    for (let k = 0; k < SEG; k++) idx.push(b, b + k + 2, b + k + 1);
+  };
+  for (let i = 0; i < n; i++) {
+    // 黃金角散佈：中間高、外圈貼水面
+    const r = Math.sqrt((i + 0.5) / n) * R, a = i * 2.39996;
+    const y = 0.006 + (1 - (r / R) ** 2) * H + rnd(i) * 0.01;
+    const lr = (0.045 + rnd(i + 3) * 0.028) * (stage === 0 ? 0.75 : 1);
+    disc(Math.cos(a) * r, y, Math.sin(a) * r, lr, (rnd(i + 7) - 0.5) * 0.6 * (r / R) + 0.08, rnd(i + 11) * 6.28, (rnd(i + 13) - 0.5) * 0.45, tones[i % tones.length]);
+  }
+  // 嫩枝上的小葉：沿莖兩兩對生，越上面越小
+  cressSprigs(stage).forEach(([x, z, tx, tz, h], i) => {
+    for (let k = 0; k < 3; k++) {
+      const t = 0.45 + k * 0.27, px = x + (tx - x) * t, pz = z + (tz - z) * t, py = 0.03 + (h - 0.03) * t;
+      const out = Math.atan2(tz - z, tx - x);
+      for (const sd of [-1, 1]) {
+        const ang = out + sd * 1.2;
+        disc(px + Math.cos(ang) * 0.03, py, pz + Math.sin(ang) * 0.03, 0.036 - k * 0.006, 0.35 * sd, -ang, 0.25, tones[(i + k) % tones.length]);
+      }
+    }
+    disc(tx, h + 0.005, tz, 0.03, 0, i, 0, tones[1]);
+  });
+  g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  cressCache.set(key, g);
+  return g;
+}
+let cressMatCache: THREE.MeshStandardMaterial | null = null;
+
+function buildCress(g: THREE.Group, s: Shape<'aquatic'>, stage: number): void {
+  cressMatCache ??= withWind(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, side: THREE.DoubleSide }), 0.06);
+  g.add(mesh(cressGeo(stage, s.leaf), cressMatCache, stage >= 2));
+  // 嫩枝的莖；成熟時頂端開白色小花
+  const stemM = cm('#4f9e3a', 0.3), flowerM = cm(s.flower, 0.3, 0.5);
+  cressSprigs(stage).forEach(([x, z, tx, tz, h], i) => {
+    rod(g, stemM, x, 0.03, z, tx, h, tz, 0.016);
+    if (stage === 3 && i % 2 === 0) for (let k = 0; k < 2; k++) part(g, GEO.sphereLo, flowerM, 0.035, 0.03, 0.035, tx + (k ? 0.025 : -0.015), h + 0.03 + k * 0.01, tz + (k ? -0.01 : 0.02), false);
+  });
+}
+
+function buildAquatic(s: Shape<'aquatic'>, stage: number): THREE.Group {
+  const g = new THREE.Group();
+  if (s.style === 'cress') buildCress(g, s, stage);
+  else buildLotus(g, s, stage);
+  return g;
+}
+
 export function buildCrop(def: CropDef, stage: number): THREE.Group {
   const g = new THREE.Group();
   const s = def.shape;
   if (s.kind === 'giant') return buildGiant(s.variant, stage);
+  if (s.kind === 'aquatic') return buildAquatic(s, stage);
   if (stage === 0) {
     for (let i = 0; i < 3; i++) {
       const seed = mesh(GEO.sphereLo, cm('#f1dfb0'), false);

@@ -6,6 +6,7 @@ import { tileOf } from '../world/grid';
 import { Mover } from './mover';
 import { node } from '../world/models';
 import { clamp, lerp } from '../core/rng';
+import { buildPlayerAcc, fitPlayerAcc } from '../world/accessories3d';
 
 export type ActionAnim = 'pull' | 'hoe' | 'plant' | 'water' | 'harvest' | 'pet' | 'sickle' | 'celebrate' | 'feed' | 'brush' | 'milk' | 'chop' | 'mine' | 'fert';
 
@@ -306,6 +307,31 @@ export class Player {
     // 高挑款：身體拉長、頭相對小一點
     if (look.body === 'tall') { this.shape.scale.set(0.95, 1.12, 0.95); this.head.scale.setScalar(0.92); }
     else { this.shape.scale.set(1.04, 1, 1.04); this.head.scale.setScalar(1); }
+    this.applyAcc();
+  }
+
+  // 服裝工坊：頭飾（戴上時收起草帽）＋眼鏡（獨立欄位）；'' = 不戴。換模型、換外觀後會自動重套
+  private acc = { hat: '', glasses: '' };
+  private accObj: { hat: THREE.Object3D | null; glasses: THREE.Object3D | null } = { hat: null, glasses: null };
+  setAccessory(hat: string, glasses: string): void {
+    for (const [k, id] of [['hat', hat], ['glasses', glasses]] as const) {
+      if (this.acc[k] === id) continue;
+      this.accObj[k]?.parent?.remove(this.accObj[k]!);
+      this.accObj[k] = id ? buildPlayerAcc(id) : null;
+      this.acc[k] = id;
+    }
+    this.applyAcc();
+  }
+  get accessory(): { hat: string; glasses: string } { return { ...this.acc }; }
+  private applyAcc(): void {
+    if (!this.acc) return; // 建構途中（欄位尚未初始化）
+    for (const o of [this.accObj.hat, this.accObj.glasses]) if (o && o.parent !== this.head) this.head.add(o);
+    const hair = this.glbHair?.[this.look.hair] ?? this.hairGroup;
+    // 包住頭頂的帽子：呆毛先收起來；再依目前髮型把帽子撐大／拉高，頭髮才不會穿出來
+    const covers = !!this.accObj.hat?.userData.coversTop;
+    hair.traverse((o) => { if (o.name.includes('ahoge')) o.visible = !covers; });
+    if (this.accObj.hat) fitPlayerAcc(this.accObj.hat, this.head, hair);
+    this.hatGroup.visible = this.look.hat && !this.acc.hat;
   }
 
   private buildHair(style: HairStyle) {

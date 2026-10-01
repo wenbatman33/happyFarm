@@ -1,7 +1,7 @@
 import { clock, dayKey } from '../core/clock';
 import { LEVEL_CAP, NEWBIE_LEVEL, NEWBIE_XP_MULT, RESTED_CAP, RESTED_PER_HOUR, dailyXp, xpNext } from '../data/economy';
 import type { WeedKind } from '../world/weeds3d';
-import { FIELD_COLS, FIELD_COUNT, GH_COUNT, STARTER_PLOTS, UNLOCK_ORDER } from './farm';
+import { FIELD_COLS, FIELD_COUNT, GH_COUNT, POND_COUNT, STARTER_PLOTS, UNLOCK_ORDER } from './farm';
 import { plotsForLevel } from '../data/economy';
 import { SPECIES, type Species } from '../actors/pet';
 import { DEFAULT_LOOK, type Look } from '../actors/player';
@@ -23,11 +23,11 @@ export interface PetSave {
   giftDay: string; napAt: number;
 }
 export interface MouseSave { id: string; plot: number; bornAt: number }
-export interface OrderSave { id: string; items: { key: string; n: number }[]; coins: number; xp: number; done: boolean }
+export interface OrderSave { id: string; items: { key: string; n: number }[]; coins: number; xp: number; done: boolean; cafe?: boolean; bonus?: string }
 export interface DebrisSave { id: string; x: number; z: number; kind: 'stone' | 'boulder' | 'stump' | 'log'; hits: number; rot: number }
 export interface PlacedFurn { uid: string; id: string; x: number; z: number; rot: number }
 export interface RoomSave { items: PlacedFurn[] }
-export type ToolId = 'can' | 'hoe' | 'sickle' | 'pick' | 'axe' | 'robot';
+export type ToolId = 'can' | 'hoe' | 'sickle' | 'shears' | 'pick' | 'axe' | 'robot';
 export interface FestTask { id: string; key: string; n: number; got: number; claimed: boolean }
 export interface SocialSave {
   hearts: number;
@@ -99,6 +99,13 @@ export interface SaveData {
   settings: Settings;
   // M5
   social: SocialSave;
+  // M6（故事章節功能、池塘、藤蔓）
+  pond: { level: number; buildUntil: number | null };
+  pets: PetSave[]; // 待在家裡的其他寵物（d.pet 是帶出門的那隻）
+  petHouse: number; // 寵物小屋階段（2 才能養多隻）
+  hives: { slot: number; at: number }[]; // 蜂箱：上次收蜂蜜的時間
+  wardrobe: { owned: string[]; hat: string; glasses: string; petOutfit: Partial<Record<Species, string>> };
+  stars: { wishes: number; night: string; scope: string }; // 流星許願次數、今晚已經用望遠鏡看過
 }
 
 // 新的乳牛：一開始奶是滿的、肚子餓（第一次見面就能擠奶、餵草）
@@ -134,7 +141,7 @@ export function freshSave(now: number): SaveData {
     coins: 120,
     rested: 0,
     inventory: { hay: 5 },
-    plots: Array.from({ length: FIELD_COUNT + GH_COUNT }, (_, i) => freshPlot(now, i < FIELD_COUNT && UNLOCK_ORDER.indexOf(i) < STARTER_PLOTS)),
+    plots: Array.from({ length: FIELD_COUNT + GH_COUNT + POND_COUNT }, (_, i) => freshPlot(now, i < FIELD_COUNT && UNLOCK_ORDER.indexOf(i) < STARTER_PLOTS)),
     weeds: [],
     zones: {},
     weedSeq: 0,
@@ -162,7 +169,7 @@ export function freshSave(now: number): SaveData {
     workshop: [],
     trees: [],
     greenhouse: { level: 0, buildUntil: null },
-    tools: { can: 0, hoe: 0, sickle: 0, pick: 0, axe: 0, robot: 0 },
+    tools: { can: 0, hoe: 0, sickle: 0, shears: 0, pick: 0, axe: 0, robot: 0 },
     robotAt: 0,
     rooms: freshRooms(),
     comfort: 10,
@@ -176,6 +183,12 @@ export function freshSave(now: number): SaveData {
     petHat: '',
     settings: { ...DEFAULT_SETTINGS },
     social: freshSocial(),
+    pond: { level: 0, buildUntil: null },
+    pets: [],
+    petHouse: 1,
+    hives: [],
+    wardrobe: { owned: [], hat: '', glasses: '', petOutfit: {} },
+    stars: { wishes: 0, night: '', scope: '' },
   };
 }
 
@@ -191,7 +204,7 @@ function migrate(d: SaveData): SaveData {
     const oldOrder = [0, 1, 2, 4, 5, 6, 8, 9, 10, 3, 7, 11];
     const cap = plotsForLevel(d.level);
     const now = d.maxSeen;
-    const plots = Array.from({ length: FIELD_COUNT + GH_COUNT }, () => freshPlot(now, false));
+    const plots = Array.from({ length: FIELD_COUNT + GH_COUNT + POND_COUNT }, () => freshPlot(now, false));
     old.forEach((p, i) => {
       const ni = Math.floor(i / 4) * FIELD_COLS + (i % 4);
       plots[ni] = { ...p, owned: oldOrder.indexOf(i) < Math.min(cap, 12), fert: false };
@@ -217,7 +230,7 @@ function migrate(d: SaveData): SaveData {
   // M3 第二批／M4／M5（2026-10-01）：溫室田（田區後面接 18 格）、工具、室內、節慶、印章、市集、社交
   while (d.plots.length < FIELD_COUNT + GH_COUNT) d.plots.push(freshPlot(d.maxSeen, false));
   if (!d.greenhouse) d.greenhouse = { level: 0, buildUntil: null };
-  if (!d.tools) d.tools = { can: 0, hoe: 0, sickle: 0, pick: 0, axe: 0, robot: 0 };
+  if (!d.tools) d.tools = { can: 0, hoe: 0, sickle: 0, shears: 0, pick: 0, axe: 0, robot: 0 };
   if (d.robotAt === undefined) d.robotAt = 0;
   if (!d.rooms) { d.rooms = freshRooms(); d.furnSeq = 10; }
   if (!d.furn) d.furn = {};
@@ -230,6 +243,15 @@ function migrate(d: SaveData): SaveData {
   if (d.petHat === undefined) d.petHat = '';
   d.settings = { ...DEFAULT_SETTINGS, ...(d.settings ?? {}) };
   if (!d.social) d.social = freshSocial();
+  // M6（2026-10-01）：池塘田接在溫室田後面 6 格、修枝剪、多隻寵物、蜂箱、服裝、流星
+  while (d.plots.length < FIELD_COUNT + GH_COUNT + POND_COUNT) d.plots.push(freshPlot(d.maxSeen, false));
+  if (!d.pond) d.pond = { level: 0, buildUntil: null };
+  if (d.tools.shears === undefined) d.tools.shears = 0;
+  if (!d.pets) d.pets = [];
+  if (!d.petHouse) d.petHouse = 1;
+  if (!d.hives) d.hives = [];
+  if (!d.wardrobe) d.wardrobe = { owned: [], hat: '', glasses: '', petOutfit: {} };
+  if (!d.stars) d.stars = { wishes: 0, night: '', scope: '' };
   return d;
 }
 

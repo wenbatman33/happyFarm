@@ -6,6 +6,7 @@ import { clock, type Season } from '../core/clock';
 import { Models } from '../world/models';
 import { FURNITURE } from '../data/furniture';
 import { FESTIVALS, type FestivalId } from '../data/festivals';
+import { PET_OUTFIT, PLAYER_ACC } from '../world/accessories3d';
 import { BOND_THRESHOLDS, xpNext } from '../data/economy';
 import type { Game } from '../game';
 import type { Weather } from '../systems/weather';
@@ -54,6 +55,8 @@ export class DevTools {
     try { p = JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { /* 忽略 */ }
     // v2（2026-10-01）：新增溫室、市集，樹的位置有調整；舊的樹位置不要套回去
     if ((p.v ?? 1) < 2 && p.scene) delete (p.scene as Partial<typeof SCENE_LAYOUT>).trees;
+    // v3（2026-10-01）：新增池塘，一顆石頭搬走了
+    if ((p.v ?? 1) < 4 && p.scene) { delete (p.scene as Partial<typeof SCENE_LAYOUT>).rocks; delete (p.scene as Partial<typeof SCENE_LAYOUT>).trees; }
     if (p.scene) Object.assign(SCENE_LAYOUT, p.scene);
     if (p.light) Object.assign(LIGHT_TWEAKS, p.light);
     if (p.pet) Object.assign(PET_TUNING, p.pet);
@@ -103,7 +106,7 @@ export class DevTools {
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => {
       const g = this.game;
-      const p: Persisted = { v: 2, layouts: g.layouts, scene: g.sceneLayout, light: g.light, pet: g.petTuning, clock: { offset: clock.offset, scale: clock.scale }, layoutMode: g.layoutMode };
+      const p: Persisted = { v: 4, layouts: g.layouts, scene: g.sceneLayout, light: g.light, pet: g.petTuning, clock: { offset: clock.offset, scale: clock.scale }, layoutMode: g.layoutMode };
       localStorage.setItem(STORE, JSON.stringify(p));
     }, 300);
   }
@@ -218,6 +221,19 @@ export class DevTools {
     ef.add({ f: () => g.calendar.welcomeBack(now(), 8 * 24) }, 'f').name('👋 模擬 8 天沒上線（回流禮包）');
     ef.add({ f: () => g.calendar.welcomeBack(now(), 31 * 24) }, 'f').name('📓 模擬 31 天沒上線（想你日記）');
     ef.close();
+
+    const m6 = gui.addFolder('🪷 池塘・章節功能');
+    m6.add({ f: () => { const d = g.state.data; d.createdAt = Math.min(d.createdAt, now() - 260 * 86400000); if (d.level < 80) g.state.addXp(9e6); } }, 'f').name('📜 解鎖第 1–10 章（天數＋等級）');
+    m6.add({ f: () => { const p = g.state.data.pond; if (p.buildUntil) p.buildUntil = now(); else if (!p.level) { p.level = 1; g.farm.grantPond(now()); g.pond.clearWater(); g.world.setPond(1, false); g.world.rebuildGrid(); } } }, 'f').name('💧 池塘立即挖好');
+    m6.add({ f: () => { g.state.data.tools.shears = 1; for (let i = 0; i < 6; i++) g.weeds.forceSpawnZone('wall', now()); } }, 'f').name('✂️ 修枝剪＋牆上長滿藤蔓');
+    m6.add({ f: () => { g.state.data.hives.forEach((h) => (h.at = 0)); } }, 'f').name('🍯 蜂蜜立即可收');
+    m6.add({ f: () => g.stars.launch() }, 'f').name('🌠 放一顆流星');
+    m6.add({ f: () => { const d = g.state.data; d.petHouse = 2; g.world.setPetHouseTier(2); for (const s of ['corgi', 'cat', 'bunny', 'duck'] as const) if (d.pet.species !== s && !d.pets.some((p) => p.species === s)) d.pets.push({ ...d.pet, name: { corgi: '麻糬', cat: '橘子', bunny: '棉花', duck: '嘎嘎' }[s], species: s, bond: 0, touches: 0, touchDay: '', stage: 0, adoptedAt: now() }); g.petHouse.syncViews(); g.world.rebuildGrid(); } }, 'f').name('🐾 小屋升級＋收養全部寵物');
+    m6.add({ f: () => { const w = g.state.data.wardrobe; for (const a of [...PLAYER_ACC, ...PET_OUTFIT]) if (!w.owned.includes(a.id)) w.owned.push(a.id); g.tailor.render(); } }, 'f').name('🧵 擁有全部服裝');
+    m6.add({ f: () => g.tailor.open() }, 'f').name('🧵 服裝工坊');
+    m6.add({ f: () => g.petHouse.open() }, 'f').name('🏡 寵物小屋');
+    m6.add({ f: () => { g.orders.d.slot = ''; g.orders.refresh(now()); } }, 'f').name('☕ 刷新訂單（含咖啡廳）');
+    m6.close();
 
     const soc = gui.addFolder('👥 社交');
     soc.add({ f: () => void g.social.open() }, 'f').name('👥 好友面板');
